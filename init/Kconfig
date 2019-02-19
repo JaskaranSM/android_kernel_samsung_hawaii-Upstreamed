@@ -751,6 +751,12 @@ config LOG_BUF_SHIFT
 	             14 => 16 KB
 		     13 =>  8 KB
 		     12 =>  4 KB
+config LOGBUF_NONCACHE
+	default n
+	bool "Make kernel logbuf non-cacheable"
+	help
+	  This option makes kernel's log buffer non cacheable
+
 
 #
 # Architectures with an unreliable sched_clock() should select this:
@@ -1134,6 +1140,17 @@ config SCHED_AUTOGROUP
 	  desktop applications.  Task group autogeneration is currently based
 	  upon task session.
 
+config SCHED_PACKING_TASKS
+	bool "Automatic tasks packing"
+	depends on SMP && SCHED_MC
+	default n
+	help
+	  This option enable the packing mode of the scheduler.
+	  This mode ensures that the minimal number of CPUs will
+	  be used to handle the activty of the system. The CPUs
+	  are selected to minimized the number of power domain
+	  that must be kept on
+
 config MM_OWNER
 	bool
 
@@ -1250,6 +1267,12 @@ config HOTPLUG
 
 config HAVE_PCSPKR_PLATFORM
 	bool
+
+config PANIC_TIMEOUT
+	int "Default panic timeout"
+	default 0
+	help
+	  Set default panic timeout.
 
 menuconfig EXPERT
 	bool "Configure standard kernel features (expert users)"

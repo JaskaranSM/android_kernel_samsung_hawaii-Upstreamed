@@ -13,6 +13,10 @@
 #include <linux/init.h>
 #include <linux/compiler.h>
 
+#ifdef CONFIG_DEBUG_SLAB_LEAK_CALLER
+#define SLAB_NCALLERS 128 /* Maximum amount of callers */
+#endif
+
 /*
  * struct kmem_cache
  *
@@ -78,6 +82,15 @@ struct kmem_cache {
 	 * variables contain the offset to the user object and its size.
 	 */
 	int obj_offset;
+
+#ifdef CONFIG_DEBUG_SLAB_LEAK_CALLER
+	/* Structure to hold the caller information */
+	struct caller_info {
+		void *caller;
+		int ncalls;
+	} callers[SLAB_NCALLERS];
+	int slab_ncallers;
+#endif
 #endif /* CONFIG_DEBUG_SLAB */
 #ifdef CONFIG_MEMCG_KMEM
 	struct memcg_cache_params *memcg_params;

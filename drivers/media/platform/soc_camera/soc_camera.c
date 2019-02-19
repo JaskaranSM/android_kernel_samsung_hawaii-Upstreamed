@@ -280,7 +280,30 @@ static int soc_camera_enum_framesizes(struct file *file, void *fh,
 
 	return ici->ops->enum_framesizes(icd, fsize);
 }
+static int soc_camera_enum_finterval(struct file *file, void *fh,
+				     struct v4l2_frmivalenum *finterval)
+{
+	int ret;
+	struct soc_camera_device *icd = file->private_data;
+	struct v4l2_subdev *sd = soc_camera_to_subdev(icd);
+	const struct soc_camera_format_xlate *xlate;
+	__u32 pixfmt = finterval->pixel_format;
+	struct v4l2_frmivalenum finterval_mbus = *finterval;
 
+	xlate = soc_camera_xlate_by_fourcc(icd, pixfmt);
+	if (!xlate)
+		return -EINVAL;
+	/* map xlate-code to pixel_format, sensor only handle xlate-code */
+	finterval_mbus.pixel_format = xlate->code;
+
+	ret = v4l2_subdev_call(sd, video, enum_frameintervals, &finterval_mbus);
+	if (ret < 0)
+		return ret;
+
+	*finterval = finterval_mbus;
+	finterval->pixel_format = pixfmt;
+	return 0;
+}
 static int soc_camera_reqbufs(struct file *file, void *priv,
 			      struct v4l2_requestbuffers *p)
 {
@@ -575,13 +598,17 @@ static int soc_camera_open(struct file *file)
 		}
 
 		ret = __soc_camera_power_on(icd);
-		if (ret < 0)
+		if (ret < 0) {
+			dev_err(icd->pdev, "failed to poweron the camera: %d\n", ret);
 			goto epower;
+		}
 
 		pm_runtime_enable(&icd->vdev->dev);
 		ret = pm_runtime_resume(&icd->vdev->dev);
-		if (ret < 0 && ret != -ENOSYS)
+		if (ret < 0 && ret != -ENOSYS) {
+			dev_err(icd->pdev, "failed pm_runtime_resume: %d\n", ret);
 			goto eresume;
+		}
 
 		/*
 		 * Try to configure with default parameters. Notice: this is the
@@ -590,22 +617,27 @@ static int soc_camera_open(struct file *file)
 		 * .host_lock is protecting us against it.
 		 */
 		ret = soc_camera_set_fmt(icd, &f);
-		if (ret < 0)
+		if (ret < 0) {
+			dev_err(icd->pdev, "failed soc_camera_set_fmt: %d\n", ret);
 			goto esfmt;
+		}
+		printk("%s 2\n",__func__);
 
 		if (ici->ops->init_videobuf) {
 			ici->ops->init_videobuf(&icd->vb_vidq, icd);
 		} else {
 			ret = ici->ops->init_videobuf2(&icd->vb2_vidq, icd);
-			if (ret < 0)
+			if (ret < 0) {
+				dev_err(icd->pdev, "failed init_videobuf2: %d\n", ret);
 				goto einitvb;
+		}
 		}
 		v4l2_ctrl_handler_setup(&icd->ctrl_handler);
 	}
 	mutex_unlock(&ici->host_lock);
 
 	file->private_data = icd;
-	dev_dbg(icd->pdev, "camera device open\n");
+	dev_info(icd->pdev, "camera device open\n");
 
 	return 0;
 
@@ -1044,7 +1076,15 @@ static int soc_camera_g_chip_ident(struct file *file, void *fh,
 
 	return v4l2_subdev_call(sd, core, g_chip_ident, id);
 }
+static long soc_camera_default_ioctl(struct file *file, void *fh,
+					bool valid_prio, int cmd, void *arg)
+{
+	struct soc_camera_device *icd = file->private_data;
+	struct v4l2_subdev *sd = soc_camera_to_subdev(icd);
 
+	return v4l2_subdev_call(sd, core, ioctl, cmd, arg);
+
+}
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 static int soc_camera_g_register(struct file *file, void *fh,
 				 struct v4l2_dbg_register *reg)
@@ -1207,6 +1247,8 @@ static int soc_camera_probe(struct soc_camera_device *icd)
 	}
 
 	sd = soc_camera_to_subdev(icd);
+	if (!sd)
+   		goto eiufmt;
 	sd->grp_id = soc_camera_grp_id(icd);
 	v4l2_set_subdev_hostdata(sd, icd);
 
@@ -1480,6 +1522,7 @@ static const struct v4l2_ioctl_ops soc_camera_ioctl_ops = {
 	.vidioc_s_std		 = soc_camera_s_std,
 	.vidioc_g_std		 = soc_camera_g_std,
 	.vidioc_enum_framesizes  = soc_camera_enum_framesizes,
+        .vidioc_enum_frameintervals = soc_camera_enum_finterval,
 	.vidioc_reqbufs		 = soc_camera_reqbufs,
 	.vidioc_querybuf	 = soc_camera_querybuf,
 	.vidioc_qbuf		 = soc_camera_qbuf,
@@ -1496,6 +1539,7 @@ static const struct v4l2_ioctl_ops soc_camera_ioctl_ops = {
 	.vidioc_g_parm		 = soc_camera_g_parm,
 	.vidioc_s_parm		 = soc_camera_s_parm,
 	.vidioc_g_chip_ident     = soc_camera_g_chip_ident,
+	.vidioc_default	         = soc_camera_default_ioctl,
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 	.vidioc_g_register	 = soc_camera_g_register,
 	.vidioc_s_register	 = soc_camera_s_register,

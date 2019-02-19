@@ -45,9 +45,21 @@ struct gpio_button_data {
 struct gpio_keys_drvdata {
 	const struct gpio_keys_platform_data *pdata;
 	struct input_dev *input;
+	struct device *sec_key;	
 	struct mutex disable_lock;
 	struct gpio_button_data data[0];
 };
+
+int gpio_keys_check(void)
+{
+	int state = 0;
+
+	state = state | (gpio_get_value_cansleep(10) ? 0 : 1);
+	printk("[KEY] %s : %d\n", __func__, state);
+	
+	return state;
+}
+EXPORT_SYMBOL(gpio_keys_check);
 
 /*
  * SYSFS interface for enabling/disabling keys and switches:
@@ -303,6 +315,13 @@ ATTR_STORE_FN(disabled_switches, EV_SW);
  * /sys/devices/platform/gpio-keys/disabled_keys [rw]
  * /sys/devices/platform/gpio-keys/disables_switches [rw]
  */
+
+ /* sys fs  */
+
+#ifdef CONFIG_SEC_DEBUG
+extern struct class *sec_class;
+#endif
+
 static DEVICE_ATTR(disabled_keys, S_IWUSR | S_IRUGO,
 		   gpio_keys_show_disabled_keys,
 		   gpio_keys_store_disabled_keys);
@@ -322,6 +341,47 @@ static struct attribute_group gpio_keys_attr_group = {
 	.attrs = gpio_keys_attrs,
 };
 
+extern int bcm_keypad_key_pressed(void);
+
+static int keyreadstatus=0;
+
+static ssize_t key_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    uint8_t keys_pressed;
+    uint32_t bcm_keypad_pressed = 0;
+
+    bcm_keypad_pressed = bcm_keypad_key_pressed();
+
+	printk("[GPIO_KEY] %s, keyreadstatus%d\n", __func__, keyreadstatus);
+
+	if(keyreadstatus || bcm_keypad_pressed)
+    {
+        /* key press */
+        keys_pressed = 1;
+        
+    } 
+    else 
+    {
+        /* key release */
+        keys_pressed = 0;                        
+    }
+
+     return sprintf(buf, "%d\n", keys_pressed );
+}
+/* sys fs */
+
+
+static DEVICE_ATTR(sec_key_pressed, S_IRUGO, key_show, NULL);
+
+static struct attribute *sec_key_attrs[] = {
+	&dev_attr_sec_key_pressed.attr,
+	NULL,
+};
+
+static struct attribute_group sec_key_attr_group = {
+	.attrs = sec_key_attrs,
+};
+
 static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 {
 	const struct gpio_keys_button *button = bdata->button;
@@ -334,6 +394,9 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 			input_event(input, type, button->code, button->value);
 	} else {
 		input_event(input, type, button->code, !!state);
+
+		keyreadstatus = !!state;
+		printk("[GPIO_KEY] %s  code=%d, key state=%d\n",__func__, button->code, keyreadstatus);
 	}
 	input_sync(input);
 }
@@ -759,10 +822,25 @@ static int gpio_keys_probe(struct platform_device *pdev)
 
 	device_init_wakeup(&pdev->dev, wakeup);
 
+#ifdef CONFIG_SEC_DEBUG
+/* /sec/sec_key/sec_key_pressed */
+     /* sys fs */
+	ddata->sec_key = device_create(sec_class, NULL, 0, ddata, "sec_key");
+	if (IS_ERR(	ddata->sec_key))
+		dev_err(dev, "Failed to create fac tsp temp dev\n");
+
+	error = sysfs_create_group(&ddata->sec_key->kobj, &sec_key_attr_group);
+	if (error) {
+		dev_err(dev, "Failed to create the test sysfs: %d\n",
+			error);
+		goto fail2;			
+	}
+#endif
 	return 0;
 
  fail3:
 	sysfs_remove_group(&pdev->dev.kobj, &gpio_keys_attr_group);
+	sysfs_remove_group(&ddata->sec_key->kobj, &sec_key_attr_group);	
  fail2:
 	while (--i >= 0)
 		gpio_remove_key(&ddata->data[i]);

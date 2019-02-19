@@ -175,7 +175,8 @@ static ssize_t lcd_show_max_contrast(struct device *dev,
 	return sprintf(buf, "%d\n", ld->props.max_contrast);
 }
 
-static struct class *lcd_class;
+struct class *lcd_class;
+EXPORT_SYMBOL(lcd_class);
 
 static void lcd_device_release(struct device *dev)
 {
@@ -274,7 +275,7 @@ static int __init lcd_class_init(void)
 		return PTR_ERR(lcd_class);
 	}
 
-	lcd_class->dev_attrs = lcd_device_attributes;
+	//lcd_class->dev_attrs = lcd_device_attributes;
 	return 0;
 }
 

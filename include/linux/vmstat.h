@@ -1,6 +1,10 @@
 #ifndef _LINUX_VMSTAT_H
 #define _LINUX_VMSTAT_H
 
+#ifdef CONFIG_TRACE_MARK_KMEM_STAT
+#include <trace/mark.h>
+#endif
+
 #include <linux/types.h>
 #include <linux/percpu.h>
 #include <linux/mm.h>
@@ -97,6 +101,9 @@ static inline void zone_page_state_add(long x, struct zone *zone,
 {
 	atomic_long_add(x, &zone->vm_stat[item]);
 	atomic_long_add(x, &vm_stat[item]);
+#ifdef CONFIG_TRACE_MARK_KMEM_STAT
+	trace_mark_kmem_stat(item);
+#endif
 }
 
 static inline unsigned long global_page_state(enum zone_stat_item item)

@@ -185,6 +185,7 @@ static void klist_release(struct kref *kref)
 {
 	struct klist_waiter *waiter, *tmp;
 	struct klist_node *n = container_of(kref, struct klist_node, n_ref);
+	struct task_struct *process;
 
 	WARN_ON(!knode_dead(n));
 	list_del(&n->n_node);

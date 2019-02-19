@@ -52,11 +52,14 @@ int mmc_send_io_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr)
 		} else {
 			if (cmd.resp[0] & MMC_CARD_BUSY)
 				break;
+			else
+				printk("%s: [%d]CARD is busy...\n", __func__, 100-i);
 		}
 
 		err = -ETIMEDOUT;
 
-		mmc_delay(10);
+		mmc_delay(9);
+		mmc_delay(1);
 	}
 
 	if (rocr)

@@ -63,6 +63,7 @@
 #include <linux/binfmts.h>
 #include <linux/sched/sysctl.h>
 
+#include <asm/system_misc.h>
 #include <asm/uaccess.h>
 #include <asm/processor.h>
 
@@ -105,6 +106,8 @@ extern char core_pattern[];
 extern unsigned int core_pipe_limit;
 #endif
 extern int pid_max;
+extern int extra_free_kbytes;
+extern int min_free_order_shift;
 extern int pid_max_min, pid_max_max;
 extern int percpu_pagelist_fraction;
 extern int compat_log;
@@ -256,11 +259,17 @@ static struct ctl_table sysctl_base_table[] = {
 	{ }
 };
 
+#ifdef CONFIG_SCHED_PACKING_TASKS
+static int min_sched_packing_level;
+static int max_sched_packing_level = 100;
+#endif /* CONFIG_SMP */
+
 #ifdef CONFIG_SCHED_DEBUG
 static int min_sched_granularity_ns = 100000;		/* 100 usecs */
 static int max_sched_granularity_ns = NSEC_PER_SEC;	/* 1 second */
 static int min_wakeup_granularity_ns;			/* 0 usecs */
 static int max_wakeup_granularity_ns = NSEC_PER_SEC;	/* 1 second */
+
 #ifdef CONFIG_SMP
 static int min_sched_tunable_scaling = SCHED_TUNABLESCALING_NONE;
 static int max_sched_tunable_scaling = SCHED_TUNABLESCALING_END-1;
@@ -280,6 +289,17 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#ifdef CONFIG_SCHED_PACKING_TASKS
+	{
+		.procname	= "sched_packing_level",
+		.data		= &sysctl_sched_packing_level,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= sched_proc_update_packing,
+		.extra1		= &min_sched_packing_level,
+		.extra2		= &max_sched_packing_level,
+	},
+#endif
 #ifdef CONFIG_SCHED_DEBUG
 	{
 		.procname	= "sched_min_granularity_ns",
@@ -898,6 +918,16 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 #endif
+#if defined(CONFIG_ARM) && defined(CONFIG_DEBUG_USER)
+	{
+		.procname	= "user_debug",
+		.data		= &user_debug,
+		.maxlen		= sizeof( int ),
+		.mode		= 0644,
+		.child		= NULL,
+		.proc_handler	= &proc_dointvec,
+	},
+#endif
 #if defined(CONFIG_MMU)
 	{
 		.procname	= "randomize_va_space",
@@ -1264,6 +1294,21 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= min_free_kbytes_sysctl_handler,
 		.extra1		= &zero,
+	},
+	{
+		.procname	= "extra_free_kbytes",
+		.data		= &extra_free_kbytes,
+		.maxlen		= sizeof(extra_free_kbytes),
+		.mode		= 0644,
+		.proc_handler	= min_free_kbytes_sysctl_handler,
+		.extra1		= &zero,
+	},
+	{
+		.procname	= "min_free_order_shift",
+		.data		= &min_free_order_shift,
+		.maxlen		= sizeof(min_free_order_shift),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec
 	},
 	{
 		.procname	= "percpu_pagelist_fraction",

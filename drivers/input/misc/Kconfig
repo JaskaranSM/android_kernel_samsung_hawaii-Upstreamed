@@ -105,6 +105,47 @@ config INPUT_PCSPKR
 	  To compile this driver as a module, choose M here: the
 	  module will be called pcspkr.
 
+config INPUT_LSM303DLH_ACCELEROMETER
+        tristate "LSM303DLH combo chip accelerometer driver"
+        depends on I2C
+        default n
+        help
+         LSM303DLH combo chip accelerometer driver.
+	 Accelerometer Driver compile flag.
+	 Currently being
+	 used by Sony Kivu platform.
+
+config INPUT_LSM303DLH_MAGNETOMETER
+        tristate "LSM303DLH combo chip magnetometer driver"
+        depends on I2C
+        default n
+        help
+         LSM303DLH combo chip magnetometer driver.
+	 Magnetometer Driver compile flag.
+	 Currently being
+	 used by Sony Kivu platform.
+
+
+config INPUT_LSM303DLHC_ACCELEROMETER
+        tristate "LSM303DLHC combo chip accelerometer driver"
+        depends on I2C
+        default n
+        help
+         LSM303DLHC combo chip accelerometer driver.
+	 Acceleromemter Driver compile flag.
+	 Currently being
+	 used by Sony Kivu platform.
+
+config INPUT_L3G4200D
+        bool "L3G4200D gyroscope sensor driver"
+        depends on I2C
+        default n
+        help
+          If you say yes here you get support L3G4200D gyroscope sensor.
+	  Gyroscope sensor driver complile flag.
+	  Currently being
+	  used by Sony Kivu platform.
+
 config INPUT_PM8XXX_VIBRATOR
 	tristate "Qualcomm PM8XXX vibrator support"
 	depends on MFD_PM8XXX
@@ -299,6 +340,17 @@ config INPUT_ATI_REMOTE2
 	  To compile this driver as a module, choose M here: the module will be
 	  called ati_remote2.
 
+config INPUT_KEYCHORD
+	tristate "Key chord input driver support"
+	help
+	  Say Y here if you want to enable the key chord driver
+	  accessible at /dev/keychord.  This driver can be used
+	  for receiving notifications when client specified key
+	  combinations are pressed.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called keychord.
+
 config INPUT_KEYSPAN_REMOTE
 	tristate "Keyspan DMR USB remote control"
 	depends on USB_ARCH_HAS_HCD
@@ -434,6 +486,11 @@ config INPUT_SGI_BTNS
 	  To compile this driver as a module, choose M here: the
 	  module will be called sgi_btns.
 
+config INPUT_GPIO
+	tristate "GPIO driver support"
+	help
+	  Say Y here if you want to support gpio based keys, wheels etc...
+
 config HP_SDC_RTC
 	tristate "HP SDC Real Time Clock"
 	depends on (GSC || HP300) && SERIO
@@ -448,6 +505,17 @@ config INPUT_PCF50633_PMU
 	help
 	 Say Y to include support for delivering  PMU events via  input
 	 layer on NXP PCF50633.
+
+config INPUT_APDS9702
+	tristate "APDS9702 proximity driver"
+	depends on I2C
+	default n
+	help
+	 If you say yes here you get support for the APDS9702 chip.
+	 This is used as a proximity sensor.
+
+	 Proximity sensor driver compile flag. Currently being used
+	 by Sony Kivu platform.
 
 config INPUT_PCF8574
 	tristate "PCF8574 Keypad input device"
@@ -636,5 +704,73 @@ config INPUT_XEN_KBDDEV_FRONTEND
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called xen-kbdfront.
+
+config INPUT_SMB380
+	tristate "SMB380/BMA023 Triaxial acceleration sensor"
+	depends on I2C
+	help
+	Say Y here if you want to support Bosch SMB380/BMA023 connected via an I2C bus.
+	To compile this driver as a module, choose M here: the module will be called smb380.
+
+config INPUT_PONKEY_BCMPMU
+        bool "BCMPMU PowerOnKey input events"
+        depends on (MFD_BCMPMU || MFD_BCM_PMU59xxx || MFD_BCM_PMU59056)
+	default n
+        help
+          Say Y here if want to support BCMPMU PowerOnKey events.
+
+          To compile this driver as a module, choose M here.
+
+
+config INPUT_BCM2850_MIC_DETECT
+   tristate "BCM2850 microphone detection support"
+   depends on I2C
+   help
+     Say Y here if you want to support MIC/Headset dectection for BCM2850 based boards.
+
+     To compile this driver as a module, choose M here.
+
+choice
+	prompt "Broadcom Kona Headset drivers"
+	depends on ARCH_KONA
+	optional
+
+config KONA_HEADSET
+	tristate "Kona headset driver"
+        help
+          Activate Kona headset driver
+
+config KONA_HEADSET_MULTI_BUTTON
+	tristate "Kona headset driver with multi button support"
+        help
+          Activate Kona headset driver with multi button support
+
+config HEADSET_PERIODIC_CHECK
+	tristate "Kona headset type periodic check"
+	depends on KONA_HEADSET_MULTI_BUTTON
+        help
+          Activate Kona headset type periodic check support
+
+config KONA_HEADSET_DEFAULT_STATE
+	tristate "Kona headset set default state"
+	depends on KONA_HEADSET_MULTI_BUTTON
+        help
+          Activate Kona headset set default state support
+
+config FLOODING_PROTECTION
+	tristate "Use this config for flooding protection"
+	depends on KONA_HEADSET_MULTI_BUTTON
+	default n
+	help
+		This driver implements support for flooding protection
+          
+endchoice
+
+config DISABLE_PON_RESTART
+	tristate "disable power on"
+        help
+          Say Y here if want to support BCM59055 PowerOnKey events.
+
+          To compile this driver as a module, choose M here.
 
 endif

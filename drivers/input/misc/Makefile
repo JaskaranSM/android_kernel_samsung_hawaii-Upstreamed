@@ -28,9 +28,11 @@ obj-$(CONFIG_INPUT_DA9055_ONKEY)	+= da9055_onkey.o
 obj-$(CONFIG_INPUT_DM355EVM)		+= dm355evm_keys.o
 obj-$(CONFIG_INPUT_GP2A)		+= gp2ap002a00f.o
 obj-$(CONFIG_INPUT_GPIO_TILT_POLLED)	+= gpio_tilt_polled.o
+obj-$(CONFIG_INPUT_GPIO)		+= gpio_event.o gpio_matrix.o gpio_input.o gpio_output.o gpio_axis.o
 obj-$(CONFIG_HP_SDC_RTC)		+= hp_sdc_rtc.o
 obj-$(CONFIG_INPUT_IMS_PCU)		+= ims-pcu.o
 obj-$(CONFIG_INPUT_IXP4XX_BEEPER)	+= ixp4xx-beeper.o
+obj-$(CONFIG_INPUT_KEYCHORD)		+= keychord.o
 obj-$(CONFIG_INPUT_KEYSPAN_REMOTE)	+= keyspan_remote.o
 obj-$(CONFIG_INPUT_KXTJ9)		+= kxtj9.o
 obj-$(CONFIG_INPUT_M68K_BEEP)		+= m68kspkr.o
@@ -60,3 +62,16 @@ obj-$(CONFIG_INPUT_WISTRON_BTNS)	+= wistron_btns.o
 obj-$(CONFIG_INPUT_WM831X_ON)		+= wm831x-on.o
 obj-$(CONFIG_INPUT_XEN_KBDDEV_FRONTEND)	+= xen-kbdfront.o
 obj-$(CONFIG_INPUT_YEALINK)		+= yealink.o
+obj-$(CONFIG_INPUT_SMB380)      += smb380.o
+ifeq ($(CONFIG_MFD_BCM_PMU59xxx),y)
+obj-$(CONFIG_INPUT_PONKEY_BCMPMU)	+= bcmpmu59xxx_ponkey.o
+endif
+obj-$(CONFIG_INPUT_BCM2850_MIC_DETECT)	+= bcm2850_mic_detect.o
+obj-$(CONFIG_KONA_HEADSET) += kona_headset.o
+obj-$(CONFIG_KONA_HEADSET_MULTI_BUTTON) += kona_headset_multi_button.o
+obj-$(CONFIG_INPUT_LSM303DLH_ACCELEROMETER) += lsm303dlh_acc.o
+obj-$(CONFIG_INPUT_LSM303DLH_MAGNETOMETER) += lsm303dlh_mag.o
+obj-$(CONFIG_INPUT_LSM303DLHC_ACCELEROMETER) += lsm303dlhc_acc.o
+obj-$(CONFIG_INPUT_L3G4200D)		+= l3g4200d_gyr_sysfs.o
+obj-$(CONFIG_INPUT_APDS9702)	        += apds9702.o
+

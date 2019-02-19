@@ -70,6 +70,9 @@ obj-$(CONFIG_REGULATOR_WM831X) += wm831x-ldo.o
 obj-$(CONFIG_REGULATOR_WM8350) += wm8350-regulator.o
 obj-$(CONFIG_REGULATOR_WM8400) += wm8400-regulator.o
 obj-$(CONFIG_REGULATOR_WM8994) += wm8994-regulator.o
-
+ifeq ($(CONFIG_MFD_BCM_PMU59xxx),y)
+obj-$(CONFIG_REGULATOR_BCMPMU)  += bcmpmu59xxx-regulator.o  bcmpmu-rgltr-bcm59xxx.o
+endif
+obj-$(CONFIG_REGULATOR_TPS728XX) += tps728xx-regulator.o
 
 ccflags-$(CONFIG_REGULATOR_DEBUG) += -DDEBUG

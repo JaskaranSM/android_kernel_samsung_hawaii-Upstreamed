@@ -17,6 +17,11 @@
 #include <linux/lzo.h>
 #include "lzodefs.h"
 
+#if defined(CONFIG_TRACE_MARK)
+#include <linux/sched.h>
+#include <trace/mark.h>
+#endif
+
 static noinline size_t
 lzo1x_1_do_compress(const unsigned char *in, size_t in_len,
 		    unsigned char *out, size_t *out_len,
@@ -222,6 +227,9 @@ int lzo1x_1_compress(const unsigned char *in, size_t in_len,
 	size_t l = in_len;
 	size_t t = 0;
 
+#if defined(CONFIG_TRACE_MARK)
+	trace_mark_begin("lzo1x_1_compress", "");
+#endif
 	while (l > 20) {
 		size_t ll = l <= (M4_MAX_OFFSET + 1) ? l : (M4_MAX_OFFSET + 1);
 		uintptr_t ll_end = (uintptr_t) ip + ll;
@@ -229,7 +237,13 @@ int lzo1x_1_compress(const unsigned char *in, size_t in_len,
 			break;
 		BUILD_BUG_ON(D_SIZE * sizeof(lzo_dict_t) > LZO1X_1_MEM_COMPRESS);
 		memset(wrkmem, 0, D_SIZE * sizeof(lzo_dict_t));
+#if defined(CONFIG_TRACE_MARK)
+		trace_mark_begin("lzo1x_1_do_compress", "");
+#endif
 		t = lzo1x_1_do_compress(ip, ll, op, out_len, t, wrkmem);
+#if defined(CONFIG_TRACE_MARK)
+		trace_mark_end("lzo1x_1_do_compress");
+#endif
 		ip += ll;
 		op += *out_len;
 		l  -= ll;
@@ -271,6 +285,10 @@ int lzo1x_1_compress(const unsigned char *in, size_t in_len,
 	*op++ = 0;
 
 	*out_len = op - out;
+#if defined(CONFIG_TRACE_MARK)
+	trace_mark_int(current->pid, "compressed_ratio", (*out_len)*100/in_len,"");
+	trace_mark_end("lzo1x_1_compress");
+#endif
 	return LZO_E_OK;
 }
 EXPORT_SYMBOL_GPL(lzo1x_1_compress);

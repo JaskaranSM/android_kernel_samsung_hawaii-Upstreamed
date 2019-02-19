@@ -1774,9 +1774,9 @@ static int __usbnet_read_cmd(struct usbnet *dev, u8 cmd, u8 reqtype,
 
 	if (data) {
 		buf = kmalloc(size, GFP_KERNEL);
-		if (!buf)
-			goto out;
 	}
+	if (!buf)
+		goto out;
 
 	err = usb_control_msg(dev->udev, usb_rcvctrlpipe(dev->udev, 0),
 			      cmd, reqtype, value, index, buf, size,
@@ -1801,9 +1801,9 @@ static int __usbnet_write_cmd(struct usbnet *dev, u8 cmd, u8 reqtype,
 
 	if (data) {
 		buf = kmemdup(data, size, GFP_KERNEL);
-		if (!buf)
-			goto out;
 	}
+	if (!buf)
+		goto out;
 
 	err = usb_control_msg(dev->udev, usb_sndctrlpipe(dev->udev, 0),
 			      cmd, reqtype, value, index, buf, size,

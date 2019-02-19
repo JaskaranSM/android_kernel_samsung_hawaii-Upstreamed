@@ -100,6 +100,7 @@ static void hci_acl_create_connection(struct hci_conn *conn)
 		cp.role_switch = 0x01;
 	else
 		cp.role_switch = 0x00;
+	//cp.role_switch = 0x00;
 
 	hci_send_cmd(hdev, HCI_OP_CREATE_CONN, sizeof(cp), &cp);
 }
@@ -172,6 +173,105 @@ static void hci_add_sco(struct hci_conn *conn, __u16 handle)
 	hci_send_cmd(hdev, HCI_OP_ADD_SCO, sizeof(cp), &cp);
 }
 
+/* Voice settings */
+#define HCI_INP_CODING_LINEAR           0x0000 /* 0000000000 */
+#define HCI_INP_CODING_U_LAW            0x0100 /* 0100000000 */
+#define HCI_INP_CODING_A_LAW            0x0200 /* 1000000000 */
+#define HCI_INP_CODING_MASK             0x0300 /* 1100000000 */
+
+#define HCI_INP_DATA_FMT_1S_COMPLEMENT  0x0000 /* 0000000000 */
+#define HCI_INP_DATA_FMT_2S_COMPLEMENT  0x0040 /* 0001000000 */
+#define HCI_INP_DATA_FMT_SIGN_MAGNITUDE 0x0080 /* 0010000000 */
+#define HCI_INP_DATA_FMT_UNSIGNED       0x00c0 /* 0011000000 */
+#define HCI_INP_DATA_FMT_MASK           0x00c0 /* 0011000000 */
+
+#define HCI_INP_SAMPLE_SIZE_8BIT        0x0000 /* 0000000000 */
+#define HCI_INP_SAMPLE_SIZE_16BIT       0x0020 /* 0000100000 */
+#define HCI_INP_SAMPLE_SIZE_MASK        0x0020 /* 0000100000 */
+
+#define HCI_INP_LINEAR_PCM_BIT_POS_MASK 0x001c /* 0000011100 */
+#define HCI_INP_LINEAR_PCM_BIT_POS_OFFS 2
+
+#define HCI_AIR_CODING_FORMAT_CVSD      0x0000 /* 0000000000 */
+#define HCI_AIR_CODING_FORMAT_U_LAW     0x0001 /* 0000000001 */
+#define HCI_AIR_CODING_FORMAT_A_LAW     0x0002 /* 0000000010 */
+#define HCI_AIR_CODING_FORMAT_TRANSPNT  0x0003 /* 0000000011 */
+#define HCI_AIR_CODING_FORMAT_MASK      0x0003 /* 0000000011 */
+
+#define ACF_TRANS   0x0003
+#define RE_LINK_QUALITY     0x02
+#define RE_POWER_CONSUMP    0x01
+enum {
+	PCMI2S_CLK_128 = 0x00, /* 128 KHz clock rate */
+	PCMI2S_CLK_256 = 0x01,
+	PCMI2S_CLK_512 = 0x02,
+	PCMI2S_CLK_1024 = 0x03,
+	PCMI2S_CLK_2048 = 0x04
+};
+
+enum {
+	PCMI2S_SLAVE_ROLE = 0x00,
+	PCMI2S_MASTER_ROLE = 0x01
+};
+
+#ifndef PCMI2S_DEF_WBS_CLK
+#define PCMI2S_DEF_WBS_CLK PCMI2S_CLK_256
+#endif
+#ifndef PCMI2S_DEF_CLK
+#define PCMI2S_DEF_CLK PCMI2S_CLK_128
+#endif
+#ifndef PCMI2S_DEF_ROLE
+#define PCMI2S_DEF_ROLE PCMI2S_SLAVE_ROLE
+#endif
+
+struct hci_vcs_enable_wbs {
+	__u8    enable;
+	__le16  type;
+} __packed;
+
+static void setup_wbs(struct hci_dev* hdev, __u16 handle)
+{
+	struct hci_vcs_enable_wbs enable_wbs = { 0x01, 0x0002 };
+	__u16 enable_wbs_opcode = 0xFC7E;
+	/* PCM, role x, 16KHz sample rate, clock xx */
+	__u8 i2spcm_int_param[] = { 0x00, (__u8)PCMI2S_DEF_ROLE, 0x01,
+			(__u8)PCMI2S_DEF_WBS_CLK };
+	__u16 i2spcm_int_param_opcode = 0xFC6D;
+
+	/* PCM, 256KBps, short, role x,role x */
+	__u8 scopcm_int_param[] = { 0x00, (__u8)PCMI2S_DEF_WBS_CLK, 0x00,
+			(__u8)PCMI2S_DEF_ROLE, (__u8)PCMI2S_DEF_ROLE };
+	__u16 scopcm_int_param_opcode = 0xFC1C;
+
+	(void)handle;
+	hci_send_cmd(hdev, enable_wbs_opcode, sizeof(enable_wbs),
+			(void *)&enable_wbs);
+	hci_send_cmd(hdev, i2spcm_int_param_opcode, sizeof(i2spcm_int_param),
+			i2spcm_int_param);
+	hci_send_cmd(hdev, scopcm_int_param_opcode, sizeof(scopcm_int_param),
+			scopcm_int_param);
+	mdelay(30);
+}
+
+static void setup_nbs(struct hci_dev* hdev, __u16 handle)
+{
+	struct hci_vcs_enable_wbs disable_wbs = { 0x00, 0x0002 };
+	__u16 disable_wbs_opcode = 0xFC7E;
+	/* PCM, role x, 8KHz sample rate, clock xx */
+	__u8 i2spcm_int_param[] = {0x00, (__u8)PCMI2S_DEF_ROLE, 0x00,
+			(__u8)PCMI2S_DEF_CLK};
+	__u16 i2spcm_int_param_opcode = 0xFC6D;
+
+	BT_INFO("setup_nbs(): PCM1 block 8khz, clk: 0x%x, role: 0x%x",
+			PCMI2S_DEF_CLK, PCMI2S_DEF_ROLE);
+	(void)handle;
+	hci_send_cmd(hdev, disable_wbs_opcode, sizeof(disable_wbs),
+			(void *)&disable_wbs);
+	hci_send_cmd(hdev, i2spcm_int_param_opcode, sizeof(i2spcm_int_param),
+			i2spcm_int_param);
+	mdelay(30);
+}
+
 void hci_setup_sync(struct hci_conn *conn, __u16 handle)
 {
 	struct hci_dev *hdev = conn->hdev;
@@ -184,14 +284,26 @@ void hci_setup_sync(struct hci_conn *conn, __u16 handle)
 
 	conn->attempt++;
 
-	cp.handle   = cpu_to_le16(handle);
-	cp.pkt_type = cpu_to_le16(conn->pkt_type);
+	cp.handle = cpu_to_le16(handle);
+	cp.tx_bandwidth = cpu_to_le32(0x00001f40);
+	cp.rx_bandwidth = cpu_to_le32(0x00001f40);
 
-	cp.tx_bandwidth   = __constant_cpu_to_le32(0x00001f40);
-	cp.rx_bandwidth   = __constant_cpu_to_le32(0x00001f40);
-	cp.max_latency    = __constant_cpu_to_le16(0xffff);
-	cp.voice_setting  = cpu_to_le16(hdev->voice_setting);
-	cp.retrans_effort = 0xff;
+	if (conn->hdev->is_wbs) {
+		/* Transparent Data */
+		uint16_t voice_setting = hdev->voice_setting | ACF_TRANS;
+		setup_wbs(conn->hdev, handle);
+		cp.max_latency = cpu_to_le16(0x000D);
+		cp.pkt_type = cpu_to_le16(ESCO_WBS);
+		cp.voice_setting = cpu_to_le16(voice_setting);
+		/* Retransmission Effort */
+		cp.retrans_effort = RE_LINK_QUALITY;
+	} else {
+		setup_nbs(conn->hdev, handle);
+		cp.max_latency = cpu_to_le16(0x000A);
+		cp.pkt_type = cpu_to_le16(conn->pkt_type);
+		cp.voice_setting = cpu_to_le16(hdev->voice_setting);
+		cp.retrans_effort = RE_POWER_CONSUMP;
+	}
 
 	hci_send_cmd(hdev, HCI_OP_SETUP_SYNC_CONN, sizeof(cp), &cp);
 }
@@ -354,7 +466,8 @@ static void hci_conn_auto_accept(unsigned long arg)
 		     &conn->dst);
 }
 
-struct hci_conn *hci_conn_add(struct hci_dev *hdev, int type, bdaddr_t *dst)
+struct hci_conn *hci_conn_add(struct hci_dev *hdev, int type,
+					__u16 pkt_type, bdaddr_t *dst)
 {
 	struct hci_conn *conn;
 
@@ -382,14 +495,22 @@ struct hci_conn *hci_conn_add(struct hci_dev *hdev, int type, bdaddr_t *dst)
 		conn->pkt_type = hdev->pkt_type & ACL_PTYPE_MASK;
 		break;
 	case SCO_LINK:
-		if (lmp_esco_capable(hdev))
-			conn->pkt_type = (hdev->esco_type & SCO_ESCO_MASK) |
-					(hdev->esco_type & EDR_ESCO_MASK);
-		else
-			conn->pkt_type = hdev->pkt_type & SCO_PTYPE_MASK;
-		break;
+		if (!pkt_type)
+			pkt_type = SCO_ESCO_MASK;
 	case ESCO_LINK:
-		conn->pkt_type = hdev->esco_type & ~EDR_ESCO_MASK;
+		if (!pkt_type)
+			pkt_type = ALL_ESCO_MASK;
+		if (lmp_esco_capable(hdev)) {
+			/* HCI Setup Synchronous Connection Command uses
+			   reverse logic on the EDR_ESCO_MASK bits */
+			conn->pkt_type = (pkt_type ^ EDR_ESCO_MASK) &
+					hdev->esco_type;
+		} else {
+			/* Legacy HCI Add Sco Connection Command uses a
+			   shifted bitmask */
+			conn->pkt_type = (pkt_type << 5) & hdev->pkt_type &
+					SCO_PTYPE_MASK;
+		}
 		break;
 	}
 
@@ -520,7 +641,7 @@ static struct hci_conn *hci_connect_le(struct hci_dev *hdev, bdaddr_t *dst,
 		if (le)
 			return ERR_PTR(-EBUSY);
 
-		le = hci_conn_add(hdev, LE_LINK, dst);
+		le = hci_conn_add(hdev, LE_LINK, 0, dst);
 		if (!le)
 			return ERR_PTR(-ENOMEM);
 
@@ -543,7 +664,7 @@ static struct hci_conn *hci_connect_acl(struct hci_dev *hdev, bdaddr_t *dst,
 
 	acl = hci_conn_hash_lookup_ba(hdev, ACL_LINK, dst);
 	if (!acl) {
-		acl = hci_conn_add(hdev, ACL_LINK, dst);
+		acl = hci_conn_add(hdev, ACL_LINK, 0, dst);
 		if (!acl)
 			return ERR_PTR(-ENOMEM);
 	}
@@ -561,7 +682,8 @@ static struct hci_conn *hci_connect_acl(struct hci_dev *hdev, bdaddr_t *dst,
 }
 
 static struct hci_conn *hci_connect_sco(struct hci_dev *hdev, int type,
-				bdaddr_t *dst, u8 sec_level, u8 auth_type)
+					__u16 pkt_type, bdaddr_t *dst,
+					u8 sec_level, u8 auth_type)
 {
 	struct hci_conn *acl;
 	struct hci_conn *sco;
@@ -572,7 +694,7 @@ static struct hci_conn *hci_connect_sco(struct hci_dev *hdev, int type,
 
 	sco = hci_conn_hash_lookup_ba(hdev, type, dst);
 	if (!sco) {
-		sco = hci_conn_add(hdev, type, dst);
+		sco = hci_conn_add(hdev, type, pkt_type, dst);
 		if (!sco) {
 			hci_conn_drop(acl);
 			return ERR_PTR(-ENOMEM);
@@ -602,7 +724,8 @@ static struct hci_conn *hci_connect_sco(struct hci_dev *hdev, int type,
 }
 
 /* Create SCO, ACL or LE connection. */
-struct hci_conn *hci_connect(struct hci_dev *hdev, int type, bdaddr_t *dst,
+struct hci_conn *hci_connect(struct hci_dev *hdev, int type,
+			     __u16 pkt_type, bdaddr_t *dst,
 			     __u8 dst_type, __u8 sec_level, __u8 auth_type)
 {
 	BT_DBG("%s dst %pMR type 0x%x", hdev->name, dst, type);
@@ -614,7 +737,7 @@ struct hci_conn *hci_connect(struct hci_dev *hdev, int type, bdaddr_t *dst,
 		return hci_connect_acl(hdev, dst, sec_level, auth_type);
 	case SCO_LINK:
 	case ESCO_LINK:
-		return hci_connect_sco(hdev, type, dst, sec_level, auth_type);
+		return hci_connect_sco(hdev, type, pkt_type, dst, sec_level, auth_type);
 	}
 
 	return ERR_PTR(-EINVAL);
@@ -687,6 +810,8 @@ int hci_conn_security(struct hci_conn *conn, __u8 sec_level, __u8 auth_type)
 	if (conn->type == LE_LINK)
 		return smp_conn_security(conn, sec_level);
 
+/*     printk("hci_conn_security, return 1\n");
+	return 1;*/
 	/* For sdp we don't need the link key. */
 	if (sec_level == BT_SECURITY_SDP)
 		return 1;
@@ -880,6 +1005,15 @@ int hci_get_conn_list(void __user *arg)
 		(ci + n)->out   = c->out;
 		(ci + n)->state = c->state;
 		(ci + n)->link_mode = c->link_mode;
+		if (c->type == SCO_LINK) {
+			(ci + n)->mtu = hdev->sco_mtu;
+			(ci + n)->cnt = hdev->sco_cnt;
+			(ci + n)->pkts = hdev->sco_pkts;
+		} else {
+			(ci + n)->mtu = hdev->acl_mtu;
+			(ci + n)->cnt = hdev->acl_cnt;
+			(ci + n)->pkts = hdev->acl_pkts;
+		}
 		if (++n >= req.conn_num)
 			break;
 	}
@@ -916,6 +1050,15 @@ int hci_get_conn_info(struct hci_dev *hdev, void __user *arg)
 		ci.out   = conn->out;
 		ci.state = conn->state;
 		ci.link_mode = conn->link_mode;
+		if (req.type == SCO_LINK) {
+			ci.mtu = hdev->sco_mtu;
+			ci.cnt = hdev->sco_cnt;
+			ci.pkts = hdev->sco_pkts;
+		} else {
+			ci.mtu = hdev->acl_mtu;
+			ci.cnt = hdev->acl_cnt;
+			ci.pkts = hdev->acl_pkts;
+		}
 	}
 	hci_dev_unlock(hdev);
 

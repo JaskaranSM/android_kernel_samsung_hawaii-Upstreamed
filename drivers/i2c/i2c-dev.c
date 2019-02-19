@@ -298,7 +298,7 @@ static noinline int i2cdev_ioctl_rdrw(struct i2c_client *client,
 				break;
 			}
 
-			rdwr_pa[i].len = rdwr_pa[i].buf[0];
+			rdwr_pa[i].len = (__u16)rdwr_pa[i].buf[0];
 		}
 	}
 	if (res < 0) {

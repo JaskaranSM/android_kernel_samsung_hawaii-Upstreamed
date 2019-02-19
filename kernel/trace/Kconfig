@@ -82,6 +82,9 @@ config EVENT_TRACING
 	select CONTEXT_SWITCH_TRACER
 	bool
 
+config GPU_TRACEPOINTS
+	bool
+
 config CONTEXT_SWITCH_TRACER
 	bool
 
@@ -402,6 +405,15 @@ config BLK_DEV_IO_TRACE
 
 	  If unsure, say N.
 
+config BLK_DEV_IO_TRACE_CUST
+	bool "Provide customized information of tracing block IO actions"
+	depends on TRACING
+	depends on BLK_DEV_IO_TRACE
+	help
+	  Customized by nani.
+	  This is for getting of customized information of block IO trace.
+
+
 config KPROBE_EVENT
 	depends on KPROBES
 	depends on HAVE_REGS_AND_STACK_ACCESS_API
@@ -577,3 +589,4 @@ endif # FTRACE
 
 endif # TRACING_SUPPORT
 
+source "kernel/trace/mark/Kconfig"

@@ -33,6 +33,10 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/syscalls.h>
 
+#ifdef CONFIG_TRACE_MARK_SYSCALL
+#include <trace/mark.h>
+#endif
+
 #define REG_PC	15
 #define REG_PSR	16
 /*
@@ -949,7 +953,11 @@ asmlinkage int syscall_trace_enter(struct pt_regs *regs, int scno)
 		scno = tracehook_report_syscall(regs, PTRACE_SYSCALL_ENTER);
 
 	if (test_thread_flag(TIF_SYSCALL_TRACEPOINT))
+#ifdef CONFIG_TRACE_MARK_SYSCALL
+		trace_mark_syscall_enter(regs, scno);
+#else
 		trace_sys_enter(regs, scno);
+#endif
 
 	audit_syscall_entry(AUDIT_ARCH_ARM, scno, regs->ARM_r0, regs->ARM_r1,
 			    regs->ARM_r2, regs->ARM_r3);
@@ -972,7 +980,11 @@ asmlinkage void syscall_trace_exit(struct pt_regs *regs)
 	 * for a PTRACE_SET_SYSCALL since then.
 	 */
 	if (test_thread_flag(TIF_SYSCALL_TRACEPOINT))
+#ifdef CONFIG_TRACE_MARK_SYSCALL
+		trace_mark_syscall_exit(regs, regs_return_value(regs));
+#else
 		trace_sys_exit(regs, regs_return_value(regs));
+#endif
 
 	if (test_thread_flag(TIF_SYSCALL_TRACE))
 		tracehook_report_syscall(regs, PTRACE_SYSCALL_EXIT);

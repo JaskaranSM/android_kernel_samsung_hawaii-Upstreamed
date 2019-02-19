@@ -92,7 +92,7 @@ MODULE_PARM_DESC(initial_descriptor_timeout,
  * otherwise the new scheme is used.  If that fails and "use_both_schemes"
  * is set, then the driver will make another attempt, using the other scheme.
  */
-static bool old_scheme_first = 0;
+static bool old_scheme_first = 1;
 module_param(old_scheme_first, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(old_scheme_first,
 		 "start with the old device initialization scheme");
@@ -693,6 +693,7 @@ static void hub_tt_work(struct work_struct *work)
 	struct usb_hub		*hub =
 		container_of(work, struct usb_hub, tt.clear_work);
 	unsigned long		flags;
+	int			limit = 100;
 
 	spin_lock_irqsave (&hub->tt.lock, flags);
 	while (!list_empty(&hub->tt.clear_list)) {
@@ -701,6 +702,9 @@ static void hub_tt_work(struct work_struct *work)
 		struct usb_device	*hdev = hub->hdev;
 		const struct hc_driver	*drv;
 		int			status;
+
+		if (!hub->quiescing && --limit < 0)
+			break;
 
 		next = hub->tt.clear_list.next;
 		clear = list_entry (next, struct usb_tt_clear, clear_list);
@@ -3025,6 +3029,10 @@ int usb_port_suspend(struct usb_device *udev, pm_message_t msg)
 		}
  err_wakeup:
 
+		/* Try to enable USB2 hardware LPM again */
+		if (udev->usb2_hw_lpm_capable == 1)
+			usb_set_usb2_hardware_lpm(udev, 1);
+
 		/* System sleep transitions should never fail */
 		if (!PMSG_IS_AUTO(msg))
 			status = 0;
@@ -4742,6 +4750,7 @@ static void hub_events(void)
 			if (portchange & USB_PORT_STAT_C_OVERCURRENT) {
 				u16 status = 0;
 				u16 unused;
+				int ret=0;
 
 				dev_dbg(hub_dev, "over-current change on port "
 					"%d\n", i);
@@ -4749,7 +4758,9 @@ static void hub_events(void)
 					USB_PORT_FEAT_C_OVER_CURRENT);
 				msleep(100);	/* Cool down */
 				hub_power_on(hub, true);
-				hub_port_status(hub, i, &status, &unused);
+				ret = hub_port_status(hub, i, &status, &unused);
+				if(ret < 0)
+					dev_err(hub_dev, "hub_port_status returns %d\n", ret);				
 				if (status & USB_PORT_STAT_OVERCURRENT)
 					dev_err(hub_dev, "over-current "
 						"condition on port %d\n", i);

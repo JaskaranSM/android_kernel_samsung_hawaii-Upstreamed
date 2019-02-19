@@ -38,7 +38,11 @@
 #define RAMOOPS_KERNMSG_HDR "===="
 #define MIN_MEM_SIZE 4096UL
 
+#ifdef CONFIG_PSTORE_RAM_RECORD_SIZE
+static ulong record_size = CONFIG_PSTORE_RAM_RECORD_SIZE;
+#else
 static ulong record_size = MIN_MEM_SIZE;
+#endif
 module_param(record_size, ulong, 0400);
 MODULE_PARM_DESC(record_size,
 		"size of each dump done on oops/panic");
@@ -51,12 +55,20 @@ static ulong ramoops_ftrace_size = MIN_MEM_SIZE;
 module_param_named(ftrace_size, ramoops_ftrace_size, ulong, 0400);
 MODULE_PARM_DESC(ftrace_size, "size of ftrace log");
 
+#ifdef CONFIG_PSTORE_RAM_ADDRESS
+static ulong mem_address = CONFIG_PSTORE_RAM_ADDRESS;
+#else
 static ulong mem_address;
+#endif
 module_param(mem_address, ulong, 0400);
 MODULE_PARM_DESC(mem_address,
 		"start of reserved RAM used to store oops/panic logs");
 
+#ifdef CONFIG_PSTORE_RAM_SIZE
+static ulong mem_size = CONFIG_PSTORE_RAM_SIZE;
+#else
 static ulong mem_size;
+#endif
 module_param(mem_size, ulong, 0400);
 MODULE_PARM_DESC(mem_size,
 		"size of reserved RAM used to store oops/panic logs");
@@ -399,6 +411,7 @@ static int ramoops_probe(struct platform_device *pdev)
 		goto fail_out;
 	}
 
+#ifndef CONFIG_PSTORE_RAM_SIZE_UNCHECK
 	if (!is_power_of_2(pdata->mem_size))
 		pdata->mem_size = rounddown_pow_of_two(pdata->mem_size);
 	if (!is_power_of_2(pdata->record_size))
@@ -407,6 +420,7 @@ static int ramoops_probe(struct platform_device *pdev)
 		pdata->console_size = rounddown_pow_of_two(pdata->console_size);
 	if (!is_power_of_2(pdata->ftrace_size))
 		pdata->ftrace_size = rounddown_pow_of_two(pdata->ftrace_size);
+#endif
 
 	cxt->dump_read_cnt = 0;
 	cxt->size = pdata->mem_size;

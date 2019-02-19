@@ -453,10 +453,12 @@ int dev_pm_qos_add_notifier(struct device *dev, struct notifier_block *notifier)
 	else if (!dev->power.qos)
 		ret = dev_pm_qos_constraints_allocate(dev);
 
-	if (!ret)
+	if (!ret){
+		if (!dev->power.qos)
+			return -ENODEV;
 		ret = blocking_notifier_chain_register(
 				dev->power.qos->latency.notifiers, notifier);
-
+	}
 	mutex_unlock(&dev_pm_qos_mtx);
 	return ret;
 }

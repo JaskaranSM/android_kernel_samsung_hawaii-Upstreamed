@@ -31,6 +31,7 @@ unsigned int __init scu_get_core_count(void __iomem *scu_base)
 	unsigned int ncores = __raw_readl(scu_base + SCU_CONFIG);
 	return (ncores & 0x03) + 1;
 }
+EXPORT_SYMBOL(scu_get_core_count);
 
 /*
  * Enable the SCU
@@ -62,6 +63,7 @@ void scu_enable(void __iomem *scu_base)
 	 */
 	flush_cache_all();
 }
+EXPORT_SYMBOL(scu_enable);
 #endif
 
 /*

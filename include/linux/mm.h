@@ -18,6 +18,10 @@
 #include <linux/bit_spinlock.h>
 #include <linux/shrinker.h>
 
+#ifdef CONFIG_TRACE_MARK_MM_RSS
+#include <trace/mark.h>
+#endif
+
 struct mempolicy;
 struct anon_vma;
 struct anon_vma_chain;
@@ -908,6 +912,7 @@ extern void pagefault_out_of_memory(void);
 extern void show_free_areas(unsigned int flags);
 extern bool skip_free_areas_node(unsigned int flags, int nid);
 
+void shmem_set_file(struct vm_area_struct *vma, struct file *file);
 int shmem_zero_setup(struct vm_area_struct *);
 
 extern int can_do_mlock(void);
@@ -1121,16 +1126,25 @@ static inline unsigned long get_mm_counter(struct mm_struct *mm, int member)
 static inline void add_mm_counter(struct mm_struct *mm, int member, long value)
 {
 	atomic_long_add(value, &mm->rss_stat.count[member]);
+#ifdef CONFIG_TRACE_MARK_MM_RSS
+	trace_mark_mm_rss_stat(mm, member);
+#endif
 }
 
 static inline void inc_mm_counter(struct mm_struct *mm, int member)
 {
 	atomic_long_inc(&mm->rss_stat.count[member]);
+#ifdef CONFIG_TRACE_MARK_MM_RSS
+	trace_mark_mm_rss_stat(mm, member);
+#endif
 }
 
 static inline void dec_mm_counter(struct mm_struct *mm, int member)
 {
 	atomic_long_dec(&mm->rss_stat.count[member]);
+#ifdef CONFIG_TRACE_MARK_MM_RSS
+	trace_mark_mm_rss_stat(mm, member);
+#endif
 }
 
 static inline unsigned long get_mm_rss(struct mm_struct *mm)
@@ -1421,6 +1435,7 @@ extern int __meminit init_per_zone_wmark_min(void);
 extern void mem_init(void);
 extern void __init mmap_init(void);
 extern void show_mem(unsigned int flags);
+extern void show_mem_others(void);
 extern void si_meminfo(struct sysinfo * val);
 extern void si_meminfo_node(struct sysinfo *val, int nid);
 
@@ -1675,7 +1690,6 @@ int vm_insert_mixed(struct vm_area_struct *vma, unsigned long addr,
 			unsigned long pfn);
 int vm_iomap_memory(struct vm_area_struct *vma, phys_addr_t start, unsigned long len);
 
-
 struct page *follow_page_mask(struct vm_area_struct *vma,
 			      unsigned long address, unsigned int foll_flags,
 			      unsigned int *page_mask);
@@ -1827,6 +1841,13 @@ void __init setup_nr_node_ids(void);
 #else
 static inline void setup_nr_node_ids(void) {}
 #endif
+struct reg_show_mem {
+	void (*cbk)(struct reg_show_mem *reg_show_mem);
+	struct list_head list;
+};
+
+extern void register_show_mem(struct reg_show_mem *);
+extern void unregister_show_mem(struct reg_show_mem *);
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_MM_H */

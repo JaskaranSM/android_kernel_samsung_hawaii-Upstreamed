@@ -114,6 +114,18 @@ static int __init parse_tag_serialnr(const struct tag *tag)
 
 __tagtable(ATAG_SERIAL, parse_tag_serialnr);
 
+static int __init serialnr_setup(char *p)
+{
+	unsigned long long full_serial = 0;
+
+	full_serial = simple_strtoll(p, NULL, 16);
+	system_serial_low = (unsigned long)((full_serial & 0xFFFFFFFF00000000) >> 32);
+	system_serial_high = (unsigned long)(full_serial & 0x00000000FFFFFFFF);
+
+	return 0;
+}
+early_param("androidboot.serialno", serialnr_setup);
+
 static int __init parse_tag_revision(const struct tag *tag)
 {
 	system_rev = tag->u.revision.rev;

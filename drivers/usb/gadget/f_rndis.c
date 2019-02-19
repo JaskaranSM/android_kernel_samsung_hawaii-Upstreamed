@@ -25,6 +25,7 @@
 #include "u_ether.h"
 #include "rndis.h"
 
+#include <linux/usb/gadget_cust.h>
 
 /*
  * This function is an RNDIS Ethernet port -- a Microsoft protocol that's
@@ -364,6 +365,10 @@ static struct usb_gadget_strings *rndis_strings[] = {
 	NULL,
 };
 
+#ifdef CONFIG_USB_ETH_SKB_ALLOC_OPTIMIZATION
+#define DMA_ALIGN_ROOM 4
+#endif
+
 /*-------------------------------------------------------------------------*/
 
 static struct sk_buff *rndis_add_header(struct gether *port,
@@ -371,7 +376,11 @@ static struct sk_buff *rndis_add_header(struct gether *port,
 {
 	struct sk_buff *skb2;
 
-	skb2 = skb_realloc_headroom(skb, sizeof(struct rndis_packet_msg_type));
+	skb2 = skb_realloc_headroom(skb, sizeof(struct rndis_packet_msg_type)
+#ifdef CONFIG_USB_ETH_SKB_ALLOC_OPTIMIZATION
+		+ DMA_ALIGN_ROOM
+#endif
+	);
 	if (skb2)
 		rndis_add_hdr(skb2);
 
@@ -408,8 +417,16 @@ static void rndis_response_available(void *_rndis)
 static void rndis_response_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct f_rndis			*rndis = req->context;
-	struct usb_composite_dev	*cdev = rndis->port.func.config->cdev;
+	struct usb_composite_dev	*cdev = NULL;
 	int				status = req->status;
+
+	/* In usb plug in/out and tetherring on/off
+	 * regression tests, port.func.config */
+	/* may be NULL pointer.*/
+	if (rndis->port.func.config != NULL)
+		cdev = rndis->port.func.config->cdev;
+	else
+		printk(KERN_ERR "rndis gadget driver is removed.\n");
 
 	/* after TX:
 	 *  - USB_CDC_GET_ENCAPSULATED_RESPONSE (ep0/control)
@@ -422,7 +439,8 @@ static void rndis_response_complete(struct usb_ep *ep, struct usb_request *req)
 		atomic_set(&rndis->notify_count, 0);
 		break;
 	default:
-		DBG(cdev, "RNDIS %s response error %d, %d/%d\n",
+		if (cdev != NULL)
+			DBG(cdev, "RNDIS %s response error %d, %d/%d\n",
 			ep->name, status,
 			req->actual, req->length);
 		/* FALLTHROUGH */
@@ -438,7 +456,8 @@ static void rndis_response_complete(struct usb_ep *ep, struct usb_request *req)
 		status = usb_ep_queue(rndis->notify, req, GFP_ATOMIC);
 		if (status) {
 			atomic_dec(&rndis->notify_count);
-			DBG(cdev, "notify/1 --> %d\n", status);
+			if (cdev != NULL)
+				DBG(cdev, "notify/1 --> %d\n", status);
 		}
 		break;
 	}
@@ -447,13 +466,21 @@ static void rndis_response_complete(struct usb_ep *ep, struct usb_request *req)
 static void rndis_command_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct f_rndis			*rndis = req->context;
+	struct usb_composite_dev	*cdev = NULL;
 	int				status;
+
+	/* In usb plug in/out regression tests, port.func.config */
+	/* may be NULL pointer.*/
+	if (rndis->port.func.config != NULL)
+		cdev = rndis->port.func.config->cdev;
+	else
+		printk(KERN_ERR "rndis gadget driver is removed.\n");
 
 	/* received RNDIS command from USB_CDC_SEND_ENCAPSULATED_COMMAND */
 //	spin_lock(&dev->lock);
 	status = rndis_msg_parser(rndis->config, (u8 *) req->buf);
-	if (status < 0)
-		pr_err("RNDIS command error %d, %d/%d\n",
+	if ((status < 0) && (cdev != NULL))
+		ERROR(cdev, "RNDIS command error %d, %d/%d\n",
 			status, req->actual, req->length);
 //	spin_unlock(&dev->lock);
 }
@@ -558,6 +585,7 @@ static int rndis_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 
 		if (rndis->port.in_ep->driver_data) {
 			DBG(cdev, "reset rndis\n");
+			NPRINTK("reset rndis\n");
 			gether_disconnect(&rndis->port);
 		}
 
@@ -608,12 +636,12 @@ fail:
 static void rndis_disable(struct usb_function *f)
 {
 	struct f_rndis		*rndis = func_to_rndis(f);
-	struct usb_composite_dev *cdev = f->config->cdev;
+//	struct usb_composite_dev *cdev = f->config->cdev;
 
 	if (!rndis->notify->driver_data)
 		return;
 
-	DBG(cdev, "rndis deactivated\n");
+	NPRINTK("\n");
 
 	rndis_uninit(rndis->config);
 	gether_disconnect(&rndis->port);
@@ -636,7 +664,7 @@ static void rndis_open(struct gether *geth)
 	struct f_rndis		*rndis = func_to_rndis(&geth->func);
 	struct usb_composite_dev *cdev = geth->func.config->cdev;
 
-	DBG(cdev, "%s\n", __func__);
+	NPRINTK("\n");
 
 	rndis_set_param_medium(rndis->config, RNDIS_MEDIUM_802_3,
 				bitrate(cdev->gadget) / 100);
@@ -647,7 +675,7 @@ static void rndis_close(struct gether *geth)
 {
 	struct f_rndis		*rndis = func_to_rndis(&geth->func);
 
-	DBG(geth->func.config->cdev, "%s\n", __func__);
+	NPRINTK("\n");
 
 	rndis_set_param_medium(rndis->config, RNDIS_MEDIUM_802_3, 0);
 	rndis_signal_disconnect(rndis->config);
@@ -736,7 +764,7 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
 	status = usb_assign_descriptors(f, eth_fs_function, eth_hs_function,
 			eth_ss_function);
 	if (status)
-		goto fail;
+		goto fail2;
 
 	rndis->port.open = rndis_open;
 	rndis->port.close = rndis_close;
@@ -768,7 +796,7 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
 
 fail:
 	usb_free_all_descriptors(f);
-
+fail2:
 	if (rndis->notify_req) {
 		kfree(rndis->notify_req->buf);
 		usb_ep_free_request(rndis->notify, rndis->notify_req);
@@ -795,7 +823,6 @@ rndis_unbind(struct usb_configuration *c, struct usb_function *f)
 	rndis_deregister(rndis->config);
 	rndis_exit();
 
-	rndis_string_defs[0].id = 0;
 	usb_free_all_descriptors(f);
 
 	kfree(rndis->notify_req->buf);
@@ -821,12 +848,12 @@ rndis_bind_config_vendor(struct usb_configuration *c, u8 ethaddr[ETH_ALEN],
 	if (!can_support_rndis(c) || !ethaddr)
 		return -EINVAL;
 
-	if (rndis_string_defs[0].id == 0) {
-		/* ... and setup RNDIS itself */
-		status = rndis_init();
-		if (status < 0)
-			return status;
+	/* setup RNDIS itself */
+	status = rndis_init();
+	if (status < 0)
+		return status;
 
+	if (rndis_string_defs[0].id == 0) {
 		status = usb_string_ids_tab(c->cdev, rndis_string_defs);
 		if (status)
 			return status;

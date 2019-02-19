@@ -300,6 +300,9 @@ static void free_block(struct kmem_cache *cachep, void **objpp, int len,
 			int node);
 static int enable_cpucache(struct kmem_cache *cachep, gfp_t gfp);
 static void cache_reap(struct work_struct *unused);
+#ifdef CONFIG_DEBUG_SLAB_LEAK_CALLER
+static void show_symbol(struct seq_file *m, unsigned long address);
+#endif
 
 static int slab_early_init = 1;
 
@@ -3123,6 +3126,26 @@ static bool slab_should_failslab(struct kmem_cache *cachep, gfp_t flags)
 	return should_failslab(cachep->object_size, flags, cachep->flags);
 }
 
+#ifdef CONFIG_DEBUG_SLAB_LEAK_CALLER
+/* A new function to lookup a caller in the list */
+static int lookup_caller(struct caller_info *cp, void *caller, int ncallers)
+{
+	int l = 0, u = ncallers;
+
+	while (l < u) {
+		int i = (l + u) / 2;
+		if (cp[i].caller == caller)
+			return i;
+		if (cp[i].caller < caller)
+			l = i + 1;
+		else
+			u = i;
+	}
+
+	return u;
+}
+#endif
+
 static inline void *____cache_alloc(struct kmem_cache *cachep, gfp_t flags)
 {
 	void *objp;
@@ -3444,6 +3467,21 @@ slab_alloc(struct kmem_cache *cachep, gfp_t flags, unsigned long caller)
 {
 	unsigned long save_flags;
 	void *objp;
+
+#ifdef CONFIG_DEBUG_SLAB_LEAK_CALLER
+	int n;
+
+	/* Lookup the caller in the list, append a caller if not found */
+	n = lookup_caller(cachep->callers, caller, cachep->slab_ncallers);
+	if (cachep->callers[n].caller == caller)
+		cachep->callers[n].ncalls++;
+	else if (cachep->slab_ncallers < SLAB_NCALLERS) {
+		memmove(cachep->callers + n + 1, cachep->callers + n, sizeof *cachep->callers * (cachep->slab_ncallers - n));
+		cachep->slab_ncallers++;
+		cachep->callers[n].caller = caller;
+		cachep->callers[n].ncalls = 1;
+	}
+#endif
 
 	flags &= gfp_allowed_mask;
 
@@ -4248,6 +4286,18 @@ void slabinfo_show_stats(struct seq_file *m, struct kmem_cache *cachep)
 
 		seq_printf(m, " : cpustat %6lu %6lu %6lu %6lu",
 			   allochit, allocmiss, freehit, freemiss);
+	}
+#endif
+#ifdef CONFIG_DEBUG_SLAB_LEAK_CALLER
+	/* Show the list of callers */
+	if (cachep->slab_ncallers) {
+		int n;
+
+		seq_printf(m, " %d callers: ", cachep->slab_ncallers);
+		for (n = 0; n < cachep->slab_ncallers; n++) {
+			show_symbol(m, (unsigned long)cachep->callers[n].caller);
+			seq_printf(m, ":%d ", cachep->callers[n].ncalls);
+		}
 	}
 #endif
 }

@@ -44,12 +44,38 @@
 #include <linux/rculist.h>
 #include <linux/poll.h>
 #include <linux/irq_work.h>
+#include <linux/dma-mapping.h>
+#include <trace/stm.h>
 #include <linux/utsname.h>
 
 #include <asm/uaccess.h>
 
+#if defined (CONFIG_SEC_DEBUG)
+#include <mach/sec_debug.h>
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/printk.h>
+
+#if defined(CONFIG_PRINTK_CPU_ID)
+static bool printk_cpu_id = 1;
+#else
+static bool printk_cpu_id;
+#endif
+module_param_named(cpu, printk_cpu_id, bool, S_IRUGO | S_IWUSR);
+
+#if defined(CONFIG_PRINTK_PID)
+static bool printk_pid = 1;
+#else
+static bool printk_pid;
+#endif
+module_param_named(pid, printk_pid, bool, S_IRUGO | S_IWUSR);
+
+void (* BrcmLogString)(const char *inLogString,
+				unsigned short inSender) = 0;
+#ifdef        CONFIG_DEBUG_LL
+extern void printascii(char *);
+#endif
 
 /* printk's without a loglevel use this.. */
 #define DEFAULT_MESSAGE_LOGLEVEL CONFIG_DEFAULT_MESSAGE_LOGLEVEL
@@ -205,6 +231,13 @@ struct log {
 	u16 len;		/* length of entire record */
 	u16 text_len;		/* length of text buffer */
 	u16 dict_len;		/* length of dictionary buffer */
+#ifdef CONFIG_PRINTK_CPU_ID
+	u8 cpu_id;		/* who is printing */
+#endif
+#ifdef CONFIG_PRINTK_PID
+	char comm[TASK_COMM_LEN];/* owner of the print */
+	pid_t pid;		/* pid of the owner */
+#endif
 	u8 facility;		/* syslog facility */
 	u8 flags:5;		/* internal record flags */
 	u8 level:3;		/* syslog level */
@@ -251,9 +284,19 @@ static u32 clear_idx;
 #define LOG_ALIGN __alignof__(struct log)
 #endif
 #define __LOG_BUF_LEN (1 << CONFIG_LOG_BUF_SHIFT)
+#ifdef CONFIG_LOGBUF_NONCACHE
+static char __initdata __log_buf[__LOG_BUF_LEN] __aligned(LOG_ALIGN);
+#else
 static char __log_buf[__LOG_BUF_LEN] __aligned(LOG_ALIGN);
-static char *log_buf = __log_buf;
-static u32 log_buf_len = __LOG_BUF_LEN;
+#endif
+/*
+ * In the case of CONFIG_LOGBUF_NONCACHE,
+ * we need __log_buf till we can perform
+ * dma_alloc_coherent. So this is a valid
+ * reference. Thus __refdata.
+ * */
+char *log_buf __refdata = __log_buf;
+u32 log_buf_len = __LOG_BUF_LEN;
 
 /* cpu currently holding logbuf_lock */
 static volatile unsigned int logbuf_cpu = UINT_MAX;
@@ -306,7 +349,8 @@ static u32 log_next(u32 idx)
 static void log_store(int facility, int level,
 		      enum log_flags flags, u64 ts_nsec,
 		      const char *dict, u16 dict_len,
-		      const char *text, u16 text_len)
+		      const char *text, u16 text_len,
+		      u8 cpu_id, struct task_struct *owner)
 {
 	struct log *msg;
 	u32 size, pad_len;
@@ -351,6 +395,13 @@ static void log_store(int facility, int level,
 	msg->facility = facility;
 	msg->level = level & 7;
 	msg->flags = flags & 0x1f;
+#ifdef CONFIG_PRINTK_CPU_ID
+	msg->cpu_id = cpu_id;
+#endif
+#ifdef CONFIG_PRINTK_PID
+	msg->pid = owner->pid;
+	memcpy(msg->comm, owner->comm, TASK_COMM_LEN);
+#endif
 	if (ts_nsec > 0)
 		msg->ts_nsec = ts_nsec;
 	else
@@ -758,8 +809,14 @@ void __init setup_log_buf(int early)
 	char *new_log_buf;
 	int free;
 
-	if (!new_log_buf_len)
+	if (!new_log_buf_len){
+#if defined(CONFIG_SEC_DEBUG)
+		//{{ Mark for GetLog
+		sec_getlog_supply_kloginfo(__log_buf);
+		//}} Mark for GetLog
+#endif
 		return;
+	}
 
 	if (early) {
 		unsigned long mem;
@@ -785,7 +842,11 @@ void __init setup_log_buf(int early)
 	free = __LOG_BUF_LEN - log_next_idx;
 	memcpy(log_buf, __log_buf, __LOG_BUF_LEN);
 	raw_spin_unlock_irqrestore(&logbuf_lock, flags);
-
+#if defined(CONFIG_SEC_DEBUG)
+	//{{ Mark for GetLog
+	sec_getlog_supply_kloginfo(__log_buf);
+	//}} Mark for GetLog
+#endif
 	pr_info("log_buf_len: %d\n", log_buf_len);
 	pr_info("early log buf free: %d(%d%%)\n",
 		free, (free * 100) / __LOG_BUF_LEN);
@@ -884,6 +945,43 @@ static size_t print_time(u64 ts, char *buf)
 		       (unsigned long)ts, rem_nsec / 1000);
 }
 
+#ifdef CONFIG_PRINTK_PID
+static size_t print_pid(const struct log *msg, char *buf)
+{
+	if (!printk_pid)
+		return 0;
+
+	if (!buf)
+		return snprintf(NULL, 0, "[%15s, %d] ", msg->comm, msg->pid);
+
+	return sprintf(buf, "[%15s, %d] ", msg->comm, msg->pid);
+}
+#else
+static size_t print_pid(const struct log *msg, char *buf)
+{
+	return 0;
+}
+#endif
+
+#ifdef CONFIG_PRINTK_CPU_ID
+static size_t print_cpuid(const struct log *msg, char *buf)
+{
+
+	if (!printk_cpu_id)
+		return 0;
+	
+	if (!buf)
+		return snprintf(NULL, 0, "C%d ", msg->cpu_id);
+
+	return sprintf(buf, "C%d ", msg->cpu_id);
+}
+#else
+static size_t print_cpuid(const struct log *msg, char *buf)
+{
+	return 0;
+}
+#endif
+
 static size_t print_prefix(const struct log *msg, bool syslog, char *buf)
 {
 	size_t len = 0;
@@ -904,6 +1002,8 @@ static size_t print_prefix(const struct log *msg, bool syslog, char *buf)
 	}
 
 	len += print_time(msg->ts_nsec, buf ? buf + len : NULL);
+	len += print_cpuid(msg, buf ? buf + len : NULL);
+	len += print_pid(msg, buf ? buf + len : NULL);
 	return len;
 }
 
@@ -1325,6 +1425,9 @@ static int have_callable_console(void)
 	return 0;
 }
 
+/* cpu currently holding logbuf_lock */
+static volatile unsigned int printk_cpu = UINT_MAX;
+
 /*
  * Can we actually use the console at this time on this cpu?
  *
@@ -1389,6 +1492,82 @@ static inline void printk_delay(void)
 	}
 }
 
+#ifdef CONFIG_BRCM_UNIFIED_LOGGING
+/* Unified logging */
+
+int bcmlog_mtt_on;
+unsigned short bcmlog_log_ulogging_id;
+/* ------------------------------------------------------------ */
+int brcm_retrive_early_printk(void)
+{
+	/* int printed_len = length; */
+	unsigned long flags;
+	int this_cpu;
+	/* char *p = data; */
+
+	preempt_disable();
+	/* This stops the holder of brcm_console_sem just where we want him */
+	raw_local_irq_save(flags);
+	this_cpu = smp_processor_id();
+
+	/*
+	 * Ouch, printk recursed into itself!
+	 */
+	if (unlikely(printk_cpu == this_cpu)) {
+		/*
+		 * If a crash is occurring during printk() on this CPU,
+		 * then try to get the crash message out but make sure
+		 * we can't deadlock. Otherwise just return to avoid the
+		 * recursion and return - but flag the recursion so that
+		 * it can be printed at the next appropriate moment:
+		 */
+		if (!oops_in_progress) {
+			recursion_bug = 1;
+			goto end_restore_irqs;
+		}
+		zap_locks();
+	}
+
+	lockdep_off();
+	raw_spin_lock(&logbuf_lock);
+	printk_cpu = this_cpu;
+
+	if (bcmlog_log_ulogging_id > 0 && BrcmLogString)
+		BrcmLogString(log_buf, bcmlog_log_ulogging_id);
+
+	/*
+	 * Try to acquire and then immediately release the
+	 * brcm_console semaphore. The release will do all the
+	 * actual magic (print out buffers, wake up klogd,
+	 * etc).
+	 *
+	 * The acquire_brcm_console_semaphore_for_printk() function
+	 * will release 'logbuf_lock' regardless of whether it
+	 * actually gets the semaphore or not.
+	 */
+	if (console_trylock_for_printk(this_cpu))
+		console_unlock();
+
+	lockdep_on();
+
+end_restore_irqs:
+	raw_local_irq_restore(flags);
+
+	preempt_enable();
+	return 0;
+}
+#else
+/* Unified logging */
+int bcmlog_mtt_on;
+unsigned short bcmlog_log_ulogging_id;
+/* ------------------------------------------------------------ */
+int brcm_retrive_early_printk(void)
+{
+	return 0;
+}
+
+#endif
+
 /*
  * Continuation lines are buffered, and not committed to the record buffer
  * until the line is complete, or a race forces it. The line fragments
@@ -1403,6 +1582,7 @@ static struct cont {
 	u64 ts_nsec;			/* time of first print */
 	u8 level;			/* log level of first message */
 	u8 facility;			/* log level of first message */
+	u8 cpu_id;			/* Which cpu is printing */
 	enum log_flags flags;		/* prefix, newline flags */
 	bool flushed:1;			/* buffer sealed and committed */
 } cont;
@@ -1421,7 +1601,8 @@ static void cont_flush(enum log_flags flags)
 		 * line. LOG_NOCONS suppresses a duplicated output.
 		 */
 		log_store(cont.facility, cont.level, flags | LOG_NOCONS,
-			  cont.ts_nsec, NULL, 0, cont.buf, cont.len);
+			  cont.ts_nsec, NULL, 0, cont.buf, cont.len,
+			  cont.cpu_id, cont.owner);
 		cont.flags = flags;
 		cont.flushed = true;
 	} else {
@@ -1430,7 +1611,8 @@ static void cont_flush(enum log_flags flags)
 		 * just submit it to the store and free the buffer.
 		 */
 		log_store(cont.facility, cont.level, flags, 0,
-			  NULL, 0, cont.buf, cont.len);
+			  NULL, 0, cont.buf, cont.len,
+			  cont.cpu_id, cont.owner);
 		cont.len = 0;
 	}
 }
@@ -1543,7 +1725,8 @@ asmlinkage int vprintk_emit(int facility, int level,
 		printed_len += strlen(recursion_msg);
 		/* emit KERN_CRIT message */
 		log_store(0, 2, LOG_PREFIX|LOG_NEWLINE, 0,
-			  NULL, 0, recursion_msg, printed_len);
+			  NULL, 0, recursion_msg, printed_len,
+			  logbuf_cpu, current);
 	}
 
 	/*
@@ -1551,6 +1734,10 @@ asmlinkage int vprintk_emit(int facility, int level,
 	 * prefix which might be passed-in as a parameter.
 	 */
 	text_len = vscnprintf(text, sizeof(textbuf), fmt, args);
+
+#ifdef	CONFIG_DEBUG_LL
+	printascii(text);
+#endif
 
 	/* mark and strip a trailing newline */
 	if (text_len && text[text_len-1] == '\n') {
@@ -1580,7 +1767,10 @@ asmlinkage int vprintk_emit(int facility, int level,
 
 	if (level == -1)
 		level = default_message_loglevel;
-
+#ifdef CONFIG_BRCM_UNIFIED_LOGGING
+if (bcmlog_mtt_on == 1 && bcmlog_log_ulogging_id > 0 && BrcmLogString)
+	BrcmLogString(textbuf, bcmlog_log_ulogging_id);
+#endif
 	if (dict)
 		lflags |= LOG_PREFIX|LOG_NEWLINE;
 
@@ -1595,7 +1785,8 @@ asmlinkage int vprintk_emit(int facility, int level,
 		/* buffer line if possible, otherwise store it right away */
 		if (!cont_add(facility, level, text, text_len))
 			log_store(facility, level, lflags | LOG_CONT, 0,
-				  dict, dictlen, text, text_len);
+				  dict, dictlen, text, text_len,
+				  logbuf_cpu, current);
 	} else {
 		bool stored = false;
 
@@ -1613,7 +1804,8 @@ asmlinkage int vprintk_emit(int facility, int level,
 
 		if (!stored)
 			log_store(facility, level, lflags, 0,
-				  dict, dictlen, text, text_len);
+				  dict, dictlen, text, text_len,
+				  logbuf_cpu, current);
 	}
 	printed_len += text_len;
 
@@ -1955,6 +2147,7 @@ void console_lock(void)
 	mutex_acquire(&console_lock_dep_map, 0, 0, _RET_IP_);
 }
 EXPORT_SYMBOL(console_lock);
+EXPORT_SYMBOL(BrcmLogString);
 
 /**
  * console_trylock - try to lock the console system for exclusive use.
@@ -2921,4 +3114,55 @@ void show_regs_print_info(const char *log_lvl)
 	       task_thread_info(current));
 }
 
+#endif
+
+#ifdef CONFIG_LOGBUF_NONCACHE
+static int logbuf_noncache;
+static int __init setup_logbuf_noncache(char *p)
+{
+	get_option(&p, &logbuf_noncache);
+	return 0;
+}
+
+early_param("logbuf_nocache", setup_logbuf_noncache);
+
+static int __init non_cached_log_buf(void){
+	dma_addr_t p;
+	void *v;
+	if (logbuf_noncache) {
+		v = dma_alloc_coherent(NULL, log_buf_len, &p, GFP_KERNEL);
+		if (v == NULL) {
+			pr_err("%s:dma_alloc_coherent failed\n", __func__);
+			BUG_ON(1);
+		}
+		log_buf = v;
+		memcpy(v, __log_buf, log_next_idx);
+		printk(KERN_INFO "Switched to non-cached __log_buf\n");
+	} else {
+		v = (void *)__get_free_pages(GFP_KERNEL,
+						get_order(log_buf_len));
+		if (v == NULL) {
+			pr_err("%s:get_free_pages failed for log_buf\n",
+				__func__);
+			BUG_ON(1);
+		}
+		log_buf = v;
+		memcpy(v, __log_buf, log_next_idx);
+		printk(KERN_INFO "__log_buf cacheable\n");
+	}
+
+#if defined(CONFIG_SEC_DEBUG)
+#if defined (CONFIG_CMA)
+	sec_getlog_supply_kloginfo(log_buf);
+#else
+	if(logbuf_noncache) {
+		sec_getlog_supply_kloginfo((char*)((vmalloc_to_pfn(log_buf)<<PAGE_SHIFT)-PHYS_OFFSET));
+	} else {
+		sec_getlog_supply_kloginfo(log_buf);
+	}
+#endif
+#endif
+	return 0;
+}
+arch_initcall(non_cached_log_buf);
 #endif

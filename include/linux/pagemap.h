@@ -15,6 +15,12 @@
 #include <linux/hardirq.h> /* for in_interrupt() */
 #include <linux/hugetlb_inline.h>
 
+#ifdef CONFIG_TRACE_MARK
+#include <linux/sched.h>
+#include <asm/current.h>
+#include <trace/mark.h>
+#endif
+
 /*
  * Bits in mapping->flags.  The lower __GFP_BITS_SHIFT bits are the page
  * allocation mode flags.
@@ -386,8 +392,17 @@ extern int wait_on_page_bit_killable(struct page *page, int bit_nr);
 
 static inline int wait_on_page_locked_killable(struct page *page)
 {
-	if (PageLocked(page))
-		return wait_on_page_bit_killable(page, PG_locked);
+	if (PageLocked(page)) {
+		int ret = 0;
+#ifdef CONFIG_TRACE_MARK_PAGE_LOCKED_KILLABLE
+		trace_mark_page_begin("wait page: locked_killable", page);
+#endif
+		ret = wait_on_page_bit_killable(page, PG_locked);
+#ifdef CONFIG_TRACE_MARK_PAGE_LOCKED_KILLABLE
+		trace_mark_page_end("wait page: locked_killable", page);
+#endif
+		return ret;
+	}
 	return 0;
 }
 
@@ -400,8 +415,15 @@ static inline int wait_on_page_locked_killable(struct page *page)
  */
 static inline void wait_on_page_locked(struct page *page)
 {
-	if (PageLocked(page))
+	if (PageLocked(page)) {
+#ifdef CONFIG_TRACE_MARK_PAGE_LOCK
+		trace_mark_page_begin("wait page: locked", page);
+#endif
 		wait_on_page_bit(page, PG_locked);
+#ifdef CONFIG_TRACE_MARK_PAGE_LOCK
+		trace_mark_page_end("wait page: locked", page);
+#endif
+	}
 }
 
 /* 
@@ -409,8 +431,15 @@ static inline void wait_on_page_locked(struct page *page)
  */
 static inline void wait_on_page_writeback(struct page *page)
 {
-	if (PageWriteback(page))
+	if (PageWriteback(page)) {
+#ifdef CONFIG_TRACE_MARK_PAGE_WRITE_BACK
+		trace_mark_page_begin("wait page: writeback", page);
+#endif
 		wait_on_page_bit(page, PG_writeback);
+#ifdef CONFIG_TRACE_MARK_PAGE_WRITE_BACK
+		trace_mark_page_end("wait page: writeback", page);
+#endif
+	}
 }
 
 extern void end_page_writeback(struct page *page);

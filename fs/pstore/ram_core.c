@@ -56,7 +56,12 @@ static inline size_t buffer_start_add(struct persistent_ram_zone *prz, size_t a)
 		new = old + a;
 		while (unlikely(new > prz->buffer_size))
 			new -= prz->buffer_size;
+#ifdef CONFIG_PSTORE_RAM_ERRATA_START_ADD
+		atomic_set(&prz->buffer->start, new);
+	} while (0);
+#else
 	} while (atomic_cmpxchg(&prz->buffer->start, old, new) != old);
+#endif
 
 	return old;
 }
@@ -75,7 +80,12 @@ static inline void buffer_size_add(struct persistent_ram_zone *prz, size_t a)
 		new = old + a;
 		if (new > prz->buffer_size)
 			new = prz->buffer_size;
+#ifdef CONFIG_PSTORE_RAM_ERRATA_SIZE_ADD
+		atomic_set(&prz->buffer->size, new);
+	} while (0);
+#else
 	} while (atomic_cmpxchg(&prz->buffer->size, old, new) != old);
+#endif
 }
 
 static void notrace persistent_ram_encode_rs8(struct persistent_ram_zone *prz,

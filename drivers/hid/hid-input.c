@@ -495,6 +495,11 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 		goto ignore;
 	}
 
+	if((usage->hid & HID_USAGE_PAGE) == HID_UP_SAMSUNG_UNDEFINED)
+		goto ignore;
+	if((usage->hid & HID_USAGE_PAGE) == HID_UP_HP_UNDEFINED)
+		goto ignore;
+
 	if (device->driver->input_mapping) {
 		int ret = device->driver->input_mapping(device, hidinput, field,
 				usage, &bit, &max);
@@ -503,6 +508,8 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 		if (ret < 0)
 			goto ignore;
 	}
+
+	printk("[%s %d] usage->hid: %x\n", __func__, __LINE__, usage->hid & HID_USAGE_PAGE);
 
 	switch (usage->hid & HID_USAGE_PAGE) {
 	case HID_UP_UNDEFINED:

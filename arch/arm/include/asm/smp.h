@@ -81,6 +81,8 @@ extern void arch_send_call_function_single_ipi(int cpu);
 extern void arch_send_call_function_ipi_mask(const struct cpumask *mask);
 extern void arch_send_wakeup_ipi_mask(const struct cpumask *mask);
 
+extern void smp_send_all_cpu_backtrace(void);
+
 struct smp_operations {
 #ifdef CONFIG_SMP
 	/*
@@ -113,5 +115,7 @@ struct smp_operations {
  * set platform specific SMP operations
  */
 extern void smp_set_ops(struct smp_operations *);
+
+extern void smp_send_all_cpu_backtrace(void);
 
 #endif /* ifndef __ASM_ARM_SMP_H */

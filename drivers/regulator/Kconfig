@@ -514,5 +514,18 @@ config REGULATOR_AS3711
 	  This driver provides support for the voltage regulators on the
 	  AS3711 PMIC
 
+config REGULATOR_BCMPMU
+	bool "BCM PMU Regulator"
+	depends on (MFD_BCMPMU || MFD_BCM_PMU59xxx || MFD_BCM_PMU59056)
+	help
+	  This driver supports the voltage regulators provided by
+	  this family of companion chips.
+
+config REGULATOR_TPS728XX
+	bool "TPS28XX Regulator"
+	depends on ARCH_REQUIRE_GPIOLIB
+	help
+	  This driver supports the voltage regulators provided by
+	  TPS728XX.
 endif
 

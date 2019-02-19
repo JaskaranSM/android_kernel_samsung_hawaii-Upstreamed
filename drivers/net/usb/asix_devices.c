@@ -607,13 +607,22 @@ static int ax88178_reset(struct usbnet *dev)
 	int gpio0 = 0;
 	u32 phyid;
 
-	asix_read_cmd(dev, AX_CMD_READ_GPIOS, 0, 0, 1, &status);
+	ret = asix_read_cmd(dev, AX_CMD_READ_GPIOS, 0, 0, 1, &status);
+	if(ret < 0)
+		return ret;
+		
 	netdev_dbg(dev->net, "GPIO Status: 0x%04x\n", status);
 
-	asix_write_cmd(dev, AX_CMD_WRITE_ENABLE, 0, 0, 0, NULL);
-	asix_read_cmd(dev, AX_CMD_READ_EEPROM, 0x0017, 0, 2, &eeprom);
-	asix_write_cmd(dev, AX_CMD_WRITE_DISABLE, 0, 0, 0, NULL);
-
+	ret = asix_write_cmd(dev, AX_CMD_WRITE_ENABLE, 0, 0, 0, NULL);
+	if(ret < 0)
+		return ret;
+	ret = asix_read_cmd(dev, AX_CMD_READ_EEPROM, 0x0017, 0, 2, &eeprom);
+	if(ret < 0)
+		return ret;
+	ret = asix_write_cmd(dev, AX_CMD_WRITE_DISABLE, 0, 0, 0, NULL);
+	if(ret < 0)
+		return ret;
+		
 	netdev_dbg(dev->net, "EEPROM index 0x17 is 0x%04x\n", eeprom);
 
 	if (eeprom == cpu_to_le16(0xffff)) {
@@ -644,8 +653,10 @@ static int ax88178_reset(struct usbnet *dev)
 	netdev_dbg(dev->net, "PHYID=0x%08x\n", phyid);
 
 	/* Set AX88178 to enable MII/GMII/RGMII interface for external PHY */
-	asix_write_cmd(dev, AX_CMD_SW_PHY_SELECT, 0, 0, 0, NULL);
-
+	ret = asix_write_cmd(dev, AX_CMD_SW_PHY_SELECT, 0, 0, 0, NULL);
+	if(ret < 0)
+		return ret;
+		
 	asix_sw_reset(dev, 0);
 	msleep(150);
 

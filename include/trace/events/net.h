@@ -46,16 +46,27 @@ DECLARE_EVENT_CLASS(net_dev_template,
 		__field(	void *,		skbaddr		)
 		__field(	unsigned int,	len		)
 		__string(	name,		skb->dev->name	)
+#ifdef CONFIG_TRACE_MARK_NET_SKB_DUMP
+		__array(	char,		dump)
+#endif
 	),
 
 	TP_fast_assign(
 		__entry->skbaddr = skb;
 		__entry->len = skb->len;
 		__assign_str(name, skb->dev->name);
+#ifdef CONFIG_TRACE_MARK_NET_SKB_DUMP
+		trace_mark_net_skb_dump(__entry->dump, TRACE_MARK_NET_SKB_DUMP_LEN, skb);
+#endif
 	),
 
+#ifdef CONFIG_TRACE_MARK_NET_SKB_DUMP
+	TP_printk("dev=%s skbaddr=%p len=%u dump=[%s]",
+		__get_str(name), __entry->skbaddr, __entry->len, __entry->dump)
+#else
 	TP_printk("dev=%s skbaddr=%p len=%u",
 		__get_str(name), __entry->skbaddr, __entry->len)
+#endif
 )
 
 DEFINE_EVENT(net_dev_template, net_dev_queue,

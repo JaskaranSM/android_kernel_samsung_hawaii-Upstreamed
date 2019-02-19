@@ -47,6 +47,9 @@ void __init_rwsem(struct rw_semaphore *sem, const char *name,
 	lockdep_init_map(&sem->dep_map, name, key, 0);
 #endif
 	sem->activity = 0;
+#ifdef CONFIG_BRCM_DEBUG_RWSEM
+	sem->wr_owner = NULL;
+#endif
 	raw_spin_lock_init(&sem->wait_lock);
 	INIT_LIST_HEAD(&sem->wait_list);
 }
@@ -71,10 +74,14 @@ __rwsem_do_wake(struct rw_semaphore *sem, int wakewrite)
 	waiter = list_entry(sem->wait_list.next, struct rwsem_waiter, list);
 
 	if (waiter->type == RWSEM_WAITING_FOR_WRITE) {
-		if (wakewrite)
+		if (wakewrite) {
+#ifdef CONFIG_BRCM_DEBUG_RWSEM
+			sem->wr_owner = waiter->task;
+#endif
 			/* Wake up a writer. Note that we do not grant it the
 			 * lock - it will have to acquire it when it runs. */
 			wake_up_process(waiter->task);
+		}
 		goto out;
 	}
 
@@ -110,6 +117,9 @@ __rwsem_wake_one_writer(struct rw_semaphore *sem)
 	struct rwsem_waiter *waiter;
 
 	waiter = list_entry(sem->wait_list.next, struct rwsem_waiter, list);
+#ifdef CONFIG_BRCM_DEBUG_RWSEM
+	sem->wr_owner = waiter->task;
+#endif
 	wake_up_process(waiter->task);
 
 	return sem;
@@ -191,6 +201,9 @@ void __sched __down_write_nested(struct rw_semaphore *sem, int subclass)
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&sem->wait_lock, flags);
+#ifdef CONFIG_BRCM_DEBUG_RWSEM
+		sem->wr_owner = current;
+#endif
 
 	/* set up my own style of waitqueue */
 	tsk = current;
@@ -238,6 +251,9 @@ int __down_write_trylock(struct rw_semaphore *sem)
 	if (sem->activity == 0) {
 		/* got the lock */
 		sem->activity = -1;
+#ifdef CONFIG_BRCM_DEBUG_RWSEM
+		sem->wr_owner = current;
+#endif
 		ret = 1;
 	}
 
@@ -271,6 +287,9 @@ void __up_write(struct rw_semaphore *sem)
 	raw_spin_lock_irqsave(&sem->wait_lock, flags);
 
 	sem->activity = 0;
+#ifdef CONFIG_BRCM_DEBUG_RWSEM
+	sem->wr_owner = NULL;
+#endif
 	if (!list_empty(&sem->wait_list))
 		sem = __rwsem_do_wake(sem, 1);
 

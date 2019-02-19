@@ -35,6 +35,9 @@
 #include <linux/capability.h>
 #include <linux/compat.h>
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/mmc.h>
+
 #include <linux/mmc/ioctl.h>
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
@@ -44,6 +47,7 @@
 #include <asm/uaccess.h>
 
 #include "queue.h"
+#include "../core/core.h"
 
 MODULE_ALIAS("mmc:block");
 #ifdef MODULE_PARAM_PREFIX
@@ -57,7 +61,7 @@ MODULE_ALIAS("mmc:block");
 #define INAND_CMD38_ARG_SECERASE 0x80
 #define INAND_CMD38_ARG_SECTRIM1 0x81
 #define INAND_CMD38_ARG_SECTRIM2 0x88
-#define MMC_BLK_TIMEOUT_MS  (10 * 60 * 1000)        /* 10 minute timeout */
+#define MMC_BLK_TIMEOUT_MS  (4 * 1000)        /* 4 sec timeout */
 
 #define mmc_req_rel_wr(req)	(((req->cmd_flags & REQ_FUA) || \
 				  (req->cmd_flags & REQ_META)) && \
@@ -78,6 +82,10 @@ static int perdev_minors = CONFIG_MMC_BLOCK_MINORS;
  * limited to 256 / number of minors per device.
  */
 static int max_devices;
+#ifdef CONFIG_MMC_BCM_SD
+#define SDHCI_CMD_DROP_RETRY 5
+#else
+#endif
 
 /* 256 minors, so at most 256 separate devices */
 static DECLARE_BITMAP(dev_use, 256);
@@ -125,6 +133,102 @@ enum {
 	MMC_PACKED_NR_ZERO,
 	MMC_PACKED_NR_SINGLE,
 };
+static LIST_HEAD(mmcpart_notifiers);
+#define MAX_MMC_HOST 3
+/* mutex used to control both the table and the notifier list */
+DEFINE_MUTEX(mmcpart_table_mutex);
+struct mmcpart_alias {
+	struct raw_hd_struct hd;
+	char partname[BDEVNAME_SIZE + 1];
+};
+static struct
+	mmcpart_alias mmcpart_table[MAX_MMC_HOST][CONFIG_MMC_BLOCK_MINORS];
+
+void register_mmcpart_user(struct mmcpart_notifier *new)
+{
+	int i, j;
+
+	mutex_lock(&mmcpart_table_mutex);
+
+	list_add(&new->list, &mmcpart_notifiers);
+
+	__module_get(THIS_MODULE);
+	for (i = 0; i < MAX_MMC_HOST; i++)
+		for (j = 0; j < (CONFIG_MMC_BLOCK_MINORS); j++) {
+			pr_debug(" fr %s , mmcpart_table[i][j].partname %s,"
+					"new->partname %s\n", __func__,
+					mmcpart_table[i][j].partname,
+					new->partname);
+			if (!strncmp
+			    (mmcpart_table[i][j].partname, new->partname,
+			     BDEVNAME_SIZE)
+			    && mmcpart_table[i][j].hd.nr_sects) {
+				new->add(&mmcpart_table[i][j].hd);
+				pr_debug(" found partname! %s\n", __func__);
+				break;
+			}
+		}
+	mutex_unlock(&mmcpart_table_mutex);
+}
+
+int unregister_mmcpart_user(struct mmcpart_notifier *old)
+{
+	int i, j;
+
+	mutex_lock(&mmcpart_table_mutex);
+
+	module_put(THIS_MODULE);
+
+	for (i = 0; i < MAX_MMC_HOST; i++)
+		for (j = 0; j < (CONFIG_MMC_BLOCK_MINORS); j++)
+			if (!strncmp(mmcpart_table[i][j].partname,
+				     old->partname, BDEVNAME_SIZE)) {
+				old->remove(&mmcpart_table[i][j].hd);
+				break;
+			}
+
+	list_del(&old->list);
+	mutex_unlock(&mmcpart_table_mutex);
+	return 0;
+}
+
+/*
+ * return alias name of mmc partition
+ * device may not be there
+ */
+void get_mmcalias_by_id(char *buf, int major, int minor)
+{
+	int host_index, partno;
+
+	buf[0] = '\0';
+	if (major != MMC_BLOCK_MAJOR)
+		return;
+
+	mutex_lock(&mmcpart_table_mutex);
+	host_index = minor / (CONFIG_MMC_BLOCK_MINORS);
+	partno = minor % (CONFIG_MMC_BLOCK_MINORS);
+	strncpy(buf, mmcpart_table[host_index][partno].partname, BDEVNAME_SIZE);
+	buf[BDEVNAME_SIZE - 1] = '\0';
+	mutex_unlock(&mmcpart_table_mutex);
+}
+
+int get_mmcpart_by_name(char *part_name, char *dev_name)
+{
+	int i, j;
+
+	mutex_lock(&mmcpart_table_mutex);
+	for (i = 0; i < MAX_MMC_HOST; i++)
+		for (j = 0; j < (CONFIG_MMC_BLOCK_MINORS); j++)
+			if (!strncmp(part_name, mmcpart_table[i][j].partname,
+				     BDEVNAME_SIZE)) {
+				snprintf(dev_name, BDEVNAME_SIZE,
+					 "mmcblk%dp%d", i, j);
+				mutex_unlock(&mmcpart_table_mutex);
+				return 0;
+			}
+	mutex_unlock(&mmcpart_table_mutex);
+	return -1;
+}
 
 module_param(perdev_minors, int, 0444);
 MODULE_PARM_DESC(perdev_minors, "Minors numbers to allocate per device");
@@ -163,11 +267,7 @@ static struct mmc_blk_data *mmc_blk_get(struct gendisk *disk)
 
 static inline int mmc_get_devidx(struct gendisk *disk)
 {
-	int devmaj = MAJOR(disk_devt(disk));
-	int devidx = MINOR(disk_devt(disk)) / perdev_minors;
-
-	if (!devmaj)
-		devidx = disk->first_minor / perdev_minors;
+	int devidx = disk->first_minor / perdev_minors;
 	return devidx;
 }
 
@@ -376,6 +476,44 @@ out:
 	return ERR_PTR(err);
 }
 
+struct scatterlist *mmc_blk_get_sg(struct mmc_card *card,
+     unsigned char *buf, int *sg_len, int size)
+{
+	struct scatterlist *sg;
+	struct scatterlist *sl;
+	int total_sec_cnt, sec_cnt;
+	int max_seg_size, len;
+
+	total_sec_cnt = size;
+	max_seg_size = card->host->max_seg_size;
+	len = (size - 1 + max_seg_size) / max_seg_size;
+	sl = kmalloc(sizeof(struct scatterlist) * len, GFP_KERNEL);
+
+	if (!sl) {
+		return NULL;
+	}
+	sg = (struct scatterlist *)sl;
+	sg_init_table(sg, len);
+
+	while (total_sec_cnt) {
+		if (total_sec_cnt < max_seg_size)
+			sec_cnt = total_sec_cnt;
+		else
+			sec_cnt = max_seg_size;
+			sg_set_page(sg, virt_to_page(buf), sec_cnt, offset_in_page(buf));
+			buf = buf + sec_cnt;
+			total_sec_cnt = total_sec_cnt - sec_cnt;
+			if (total_sec_cnt == 0)
+				break;
+			sg = sg_next(sg);
+	}
+
+	if (sg)
+		sg_mark_end(sg);
+	*sg_len = len;
+	return sl;
+}  
+
 static int ioctl_rpmb_card_status_poll(struct mmc_card *card, u32 *status,
 				       u32 retries_max)
 {
@@ -416,9 +554,9 @@ static int mmc_blk_ioctl_cmd(struct block_device *bdev,
 	struct mmc_card *card;
 	struct mmc_command cmd = {0};
 	struct mmc_data data = {0};
-	struct mmc_request mrq = {NULL};
-	struct scatterlist sg;
-	int err;
+	struct mmc_request mrq = {0};
+	struct scatterlist *sg = 0;
+	int err = 0;
 	int is_rpmb = false;
 	u32 status = 0;
 
@@ -454,12 +592,13 @@ static int mmc_blk_ioctl_cmd(struct block_device *bdev,
 	cmd.flags = idata->ic.flags;
 
 	if (idata->buf_bytes) {
-		data.sg = &sg;
-		data.sg_len = 1;
+		int len;
 		data.blksz = idata->ic.blksz;
 		data.blocks = idata->ic.blocks;
 
-		sg_init_one(data.sg, idata->buf, idata->buf_bytes);
+                sg = mmc_blk_get_sg(card, idata->buf, &len, idata->buf_bytes);
+                data.sg = sg;
+                data.sg_len = len;
 
 		if (idata->ic.write_flag)
 			data.flags = MMC_DATA_WRITE;
@@ -562,6 +701,9 @@ cmd_rel_host:
 
 cmd_done:
 	mmc_blk_put(md);
+	if (sg)
+		kfree(sg);
+
 cmd_err:
 	kfree(idata->buf);
 	kfree(idata);
@@ -571,9 +713,27 @@ cmd_err:
 static int mmc_blk_ioctl(struct block_device *bdev, fmode_t mode,
 	unsigned int cmd, unsigned long arg)
 {
+	struct mmc_blk_data *md = bdev->bd_disk->private_data;
+	struct mmc_card *card = md->queue.card;
 	int ret = -EINVAL;
 	if (cmd == MMC_IOC_CMD)
 		ret = mmc_blk_ioctl_cmd(bdev, (struct mmc_ioc_cmd __user *)arg);
+	else if(cmd == MMC_IOC_CLOCK)
+	{
+		unsigned int clock = (unsigned int)arg;
+		if(clock < card->host->f_min)
+			clock = card->host->f_min;
+		
+		mmc_set_clock(card->host, clock);
+		ret = 0;
+	}
+	else if(cmd == MMC_IOC_BUSWIDTH)
+	{
+		unsigned int width = (unsigned int)arg;
+		mmc_set_bus_width(card->host, width);
+		ret = 0;
+	}
+
 	return ret;
 }
 
@@ -605,6 +765,17 @@ static inline int mmc_blk_part_switch(struct mmc_card *card,
 	if (main_md->part_curr == md->part_type)
 		return 0;
 
+	/*
+	 * We see CMD6 fail (with data timeouts) on switching between
+	 * boot1 and boot0 partitions. As those partitions are not used
+	 * we comment switching to them for now and will continue to
+	 * debug the issue.
+	 */
+#ifdef CONFIG_MACH_BCM_FPGA
+	if ((md->part_type == 1) || (md->part_type == 2))
+		return -1;
+#endif
+
 	if (mmc_card_mmc(card)) {
 		u8 part_config = card->ext_csd.part_config;
 
@@ -621,6 +792,26 @@ static inline int mmc_blk_part_switch(struct mmc_card *card,
 	}
 
 	main_md->part_curr = md->part_type;
+
+#ifdef CONFIG_MMC_BCM_SD
+	/*
+	 * Work-around for RPMB partition switch error on newer SS TLC MCP.
+	 * Below are details of the issue and suggested work-around from SS-
+	 * - I heard from Samsung HQ in Korea. There has been an error for
+	 *   RPMB partition switching at 4GB/8GB TLC product
+	 *   which has been produced since last May.
+	 * - Henry (Samsung planning guy) will send a report for it and
+	 *   release the re-patch date.
+	 * - Before that it is recommened to 1ms delay rather than 300us.
+	 *   1ms is totally safe based on Samsung test.
+	 * - It is also recommend to insert check the bit[1:0] of ext_csd[179]
+	 *   after RPMB partition switching.
+	 *
+	 * NOTE: I'm currently implementing only the 1ms delay workaround.
+	 */
+	mdelay(1);
+#endif
+
 	return 0;
 }
 
@@ -728,18 +919,22 @@ static int mmc_blk_cmd_error(struct request *req, const char *name, int error,
 			req->rq_disk->disk_name, "timed out", name, status);
 
 		/* If the status cmd initially failed, retry the r/w cmd */
-		if (!status_valid)
+		if (!status_valid) {
+			pr_err("%s: status not valid, retrying timeout\n", req->rq_disk->disk_name);
 			return ERR_RETRY;
-
+		}
 		/*
 		 * If it was a r/w cmd crc error, or illegal command
 		 * (eg, issued in wrong state) then retry - we should
 		 * have corrected the state problem above.
 		 */
-		if (status & (R1_COM_CRC_ERROR | R1_ILLEGAL_COMMAND))
+		if (status & (R1_COM_CRC_ERROR | R1_ILLEGAL_COMMAND)) {
+			pr_err("%s: command error, retrying timeout\n", req->rq_disk->disk_name);
 			return ERR_RETRY;
+		}
 
 		/* Otherwise abort the command */
+		pr_err("%s: not retrying timeout\n", req->rq_disk->disk_name);
 		return ERR_ABORT;
 
 	default:
@@ -829,9 +1024,15 @@ static int mmc_blk_cmd_recovery(struct mmc_card *card, struct request *req,
 	}
 
 	/* Check for set block count errors */
-	if (brq->sbc.error)
+	if (brq->sbc.error) {
+		if (status & R1_ILLEGAL_COMMAND) {
+			card->quirks |= MMC_QUIRK_BLK_NO_CMD23;
+			pr_warning("%s:SET_BLOCK_COUNT error, CMD23 is not supported.\n",
+				req->rq_disk->disk_name);
+		}
 		return mmc_blk_cmd_error(req, "SET_BLOCK_COUNT", brq->sbc.error,
 				prev_cmd_status_valid, status);
+	}
 
 	/* Check for r/w command errors */
 	if (brq->cmd.error)
@@ -1002,9 +1203,12 @@ retry:
 			goto out;
 	}
 
-	if (mmc_can_sanitize(card))
+	if (mmc_can_sanitize(card)) {
+		trace_mmc_blk_erase_start(EXT_CSD_SANITIZE_START, 0, 0);
 		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 				 EXT_CSD_SANITIZE_START, 1, 0);
+		trace_mmc_blk_erase_end(EXT_CSD_SANITIZE_START, 0, 0);
+	}
 out_retry:
 	if (err && !mmc_blk_reset(md, card->host, type))
 		goto retry;
@@ -1278,7 +1482,6 @@ static void mmc_blk_rw_rq_prep(struct mmc_queue_req *mqrq,
 	 */
 	if (brq->data.blocks > card->host->max_blk_count)
 		brq->data.blocks = card->host->max_blk_count;
-
 	if (brq->data.blocks > 1) {
 		/*
 		 * After a read error, we redo the request one sector
@@ -1294,7 +1497,8 @@ static void mmc_blk_rw_rq_prep(struct mmc_queue_req *mqrq,
 			brq->data.blocks = 1;
 	}
 
-	if (brq->data.blocks > 1 || do_rel_wr) {
+	if (brq->data.blocks > 1 || do_rel_wr ||
+			md->part_type == EXT_CSD_PART_CONFIG_ACC_RPMB) {
 		/* SPI multiblock writes terminate using a special
 		 * token, not a STOP_TRANSMISSION request.
 		 */
@@ -1751,6 +1955,9 @@ static int mmc_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 		type = rq_data_dir(req) == READ ? MMC_BLK_READ : MMC_BLK_WRITE;
 		mmc_queue_bounce_post(mq_rq);
 
+		if (brq->cmd.error == -ENOMEDIUM)
+			goto cmd_abort;
+
 		switch (status) {
 		case MMC_BLK_SUCCESS:
 		case MMC_BLK_PARTIAL:
@@ -1885,6 +2092,25 @@ static int mmc_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 	return 0;
 }
 
+#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
+static int mmc_blk_set_blksize(struct mmc_blk_data *md, struct mmc_card *card)
+{
+	int err;
+
+	mmc_claim_host(card->host);
+	err = mmc_set_blocklen(card, 512);
+	mmc_release_host(card->host);
+
+	if (err) {
+		printk(KERN_ERR "%s: unable to set block size to 512: %d\n",
+				md->disk->disk_name, err);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+#endif
+
 static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 {
 	int ret;
@@ -1892,6 +2118,15 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 	struct mmc_card *card = md->queue.card;
 	struct mmc_host *host = card->host;
 	unsigned long flags;
+	int special_req = 0;
+
+
+#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
+	if (mmc_bus_needs_resume(card->host)) {
+		mmc_resume_bus(card->host);
+		mmc_blk_set_blksize(md, card);
+	}
+#endif
 
 	if (req && !mq->mqrq_prev->req)
 		/* claim host only for the first request */
@@ -1907,6 +2142,8 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 	}
 
 	mq->flags &= ~MMC_QUEUE_NEW_REQUEST;
+	if (req && (req->cmd_flags & MMC_REQ_SPECIAL_MASK))
+		special_req = 1;
 	if (req && req->cmd_flags & REQ_DISCARD) {
 		/* complete ongoing async transfer before issuing discard */
 		if (card->host->areq)
@@ -1932,7 +2169,7 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 
 out:
 	if ((!req && !(mq->flags & MMC_QUEUE_NEW_REQUEST)) ||
-	     (req && (req->cmd_flags & MMC_REQ_SPECIAL_MASK)))
+		special_req)
 		/*
 		 * Release host when there are no more requests
 		 * and after special request(discard, flush) is done.
@@ -2015,6 +2252,7 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
 	md->disk->queue = md->queue.queue;
 	md->disk->driverfs_dev = parent;
 	set_disk_ro(md->disk, md->read_only || default_ro);
+	md->disk->flags = GENHD_FL_EXT_DEVT;
 	if (area_type & MMC_BLK_DATA_AREA_RPMB)
 		md->disk->flags |= GENHD_FL_NO_PART_SCAN;
 
@@ -2039,6 +2277,7 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
 	else
 		blk_queue_logical_block_size(md->queue.queue, 512);
 
+	blk_queue_erase_size(md->queue.queue, card->erase_size);
 	set_capacity(md->disk, size);
 
 	if (mmc_host_cmd23(card->host)) {
@@ -2138,7 +2377,7 @@ static int mmc_blk_alloc_parts(struct mmc_card *card, struct mmc_blk_data *md)
 		return 0;
 
 	for (idx = 0; idx < card->nr_parts; idx++) {
-		if (card->part[idx].size) {
+		if (card->part[idx].size && (card->part[idx].area_type == MMC_BLK_DATA_AREA_MAIN)) {
 			ret = mmc_blk_alloc_part(card, md,
 				card->part[idx].part_cfg,
 				card->part[idx].size >> 9,
@@ -2149,18 +2388,33 @@ static int mmc_blk_alloc_parts(struct mmc_card *card, struct mmc_blk_data *md)
 				return ret;
 		}
 	}
-
 	return ret;
 }
 
 static void mmc_blk_remove_req(struct mmc_blk_data *md)
 {
 	struct mmc_card *card;
-
+	int i, index;
+	struct mmcpart_notifier *nt;
 	if (md) {
 		card = md->queue.card;
 		if (md->disk->flags & GENHD_FL_UP) {
 			device_remove_file(disk_to_dev(md->disk), &md->force_ro);
+			index = md->disk->first_minor
+					>> (CONFIG_MMC_BLOCK_MINORS - 1);
+			mutex_lock(&mmcpart_table_mutex);
+			for (i = 0; i < md->disk->part_tbl->len; i++) {
+				list_for_each_entry(nt, &mmcpart_notifiers,
+						    list)
+				    if (strlen(nt->partname)
+					&& !strncmp(nt->partname,
+						    mmcpart_table[index][i].
+						    partname, BDEVNAME_SIZE))
+					nt->remove(&mmcpart_table[index][i].hd);
+				memset(&mmcpart_table[index][i].hd, 0,
+				       sizeof(struct raw_hd_struct));
+			}
+			mutex_unlock(&mmcpart_table_mutex);
 			if ((md->area_type & MMC_BLK_DATA_AREA_BOOT) &&
 					card->ext_csd.boot_ro_lockable)
 				device_remove_file(disk_to_dev(md->disk),
@@ -2241,6 +2495,8 @@ force_ro_fail:
 #define CID_MANFID_TOSHIBA	0x11
 #define CID_MANFID_MICRON	0x13
 #define CID_MANFID_SAMSUNG	0x15
+#define CID_MANFID_KINGSTONE 0x41
+#define CID_OEMID_KINGSTONE  0x3432
 
 static const struct mmc_fixup blk_fixups[] =
 {
@@ -2263,6 +2519,8 @@ static const struct mmc_fixup blk_fixups[] =
 	 *
 	 * N.B. This doesn't affect SD cards.
 	 */
+	MMC_FIXUP("SD16G", CID_MANFID_KINGSTONE, CID_OEMID_KINGSTONE, add_quirk,
+		  MMC_QUIRK_BLK_NO_CMD23),
 	MMC_FIXUP("MMC08G", CID_MANFID_TOSHIBA, CID_OEMID_ANY, add_quirk_mmc,
 		  MMC_QUIRK_BLK_NO_CMD23),
 	MMC_FIXUP("MMC16G", CID_MANFID_TOSHIBA, CID_OEMID_ANY, add_quirk_mmc,
@@ -2298,14 +2556,22 @@ static const struct mmc_fixup blk_fixups[] =
 		  MMC_QUIRK_SEC_ERASE_TRIM_BROKEN),
 	MMC_FIXUP("VZL00M", CID_MANFID_SAMSUNG, CID_OEMID_ANY, add_quirk_mmc,
 		  MMC_QUIRK_SEC_ERASE_TRIM_BROKEN),
-
+	MMC_FIXUP("N5WZMB", CID_MANFID_SAMSUNG, CID_OEMID_ANY, add_quirk_mmc,
+		  MMC_QUIRK_SEC_ERASE_TRIM_BROKEN),
+	MMC_FIXUP("K5WVMB", CID_MANFID_SAMSUNG, CID_OEMID_ANY, add_quirk_mmc,
+		  MMC_QUIRK_SEC_ERASE_TRIM_BROKEN),
 	END_FIXUP
 };
 
 static int mmc_blk_probe(struct mmc_card *card)
 {
 	struct mmc_blk_data *md, *part_md;
+	struct mmcpart_notifier *nt;
+	struct disk_part_iter piter;
+	struct hd_struct *disk_part;
+	int cnt = 0;
 	char cap_str[10];
+	int i, index;
 
 	/*
 	 * Check that the card supports the command class(es) we need.
@@ -2329,6 +2595,9 @@ static int mmc_blk_probe(struct mmc_card *card)
 	mmc_set_drvdata(card, md);
 	mmc_fixup_device(card, blk_fixups);
 
+#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
+	mmc_set_bus_resume_policy(card->host, 1);
+#endif
 	if (mmc_add_disk(md))
 		goto out;
 
@@ -2336,6 +2605,60 @@ static int mmc_blk_probe(struct mmc_card *card)
 		if (mmc_add_disk(part_md))
 			goto out;
 	}
+	mutex_lock(&mmcpart_table_mutex);
+	pr_debug(KERN_ERR "Iterator runnning now..\n");
+	index
+		= md->disk->first_minor >> (CONFIG_MMC_BLOCK_MINORS - 1);
+
+	disk_part_iter_init(&piter, md->disk, 0);
+	while ((disk_part = disk_part_iter_next(&piter))) {
+		strncpy(mmcpart_table[index][cnt].partname,
+			disk_part->info->volname, BDEVNAME_SIZE);
+		mmcpart_table[index][cnt].partname[sizeof(mmcpart_table[index][cnt].partname)-1] = '\0';
+		mmcpart_table[index][cnt].hd.start_sect = disk_part->start_sect;
+		mmcpart_table[index][cnt].hd.nr_sects = disk_part->nr_sects;
+		pr_debug(KERN_ERR
+			 "%s: partname: %s, start_sect: %llu nr_sects %llu,",
+			 __func__, disk_part->info->volname,
+			 (unsigned long long)disk_part->start_sect, 
+			 (unsigned long long)disk_part->nr_sects);
+		cnt++;
+	}
+	disk_part_iter_exit(&piter);
+	pr_debug(KERN_ERR "part iterator done!!\n");
+	for (i = 0; i < md->disk->part_tbl->len - 1; i++) {
+		pr_debug(KERN_ERR "%s: partname: %s, start_sect: %llu,"
+			 "nr_sects: %llu, partno: %d, major: %d, minor: %d, part_tbl->len %d\n",
+			 __func__,
+			 mmcpart_table[index][i].partname,
+			(unsigned long long)md->disk->part_tbl->part[i]->start_sect,
+			(unsigned long long)md->disk->part_tbl->part[i]->nr_sects,
+			 i,
+			 mmcpart_table[index][i].hd.major,
+			 mmcpart_table[index][i].hd.first_minor,
+			 md->disk->part_tbl->len);
+		mmcpart_table[index][i].hd.partno = i;
+		mmcpart_table[index][i].hd.major = MAJOR(disk_devt(md->disk));
+		mmcpart_table[index][i].hd.first_minor =
+		    MINOR(disk_devt(md->disk));
+
+		list_for_each_entry(nt, &mmcpart_notifiers, list) {
+			if (strlen(nt->partname) && !strncmp(nt->partname,
+							     mmcpart_table
+							     [index][i].
+							     partname,
+							     BDEVNAME_SIZE)) {
+				pr_debug(KERN_INFO
+					 "%s: adding mmcblk%dp%d:%s %llu %llu\n",
+					 __func__, index, i,
+					 mmcpart_table[index][i].partname,
+					 (unsigned long long)mmcpart_table[index][i].hd.start_sect,
+					 (unsigned long long)mmcpart_table[index][i].hd.nr_sects);
+				nt->add(&mmcpart_table[index][i].hd);
+			}
+		}
+	}
+	mutex_unlock(&mmcpart_table_mutex);
 	return 0;
 
  out:
@@ -2354,6 +2677,9 @@ static void mmc_blk_remove(struct mmc_card *card)
 	mmc_release_host(card->host);
 	mmc_blk_remove_req(md);
 	mmc_set_drvdata(card, NULL);
+#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
+	mmc_set_bus_resume_policy(card->host, 0);
+#endif
 }
 
 #ifdef CONFIG_PM

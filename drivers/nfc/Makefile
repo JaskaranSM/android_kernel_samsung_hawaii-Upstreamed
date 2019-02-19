@@ -2,10 +2,9 @@
 # Makefile for nfc devices
 #
 
-obj-$(CONFIG_NFC_PN544)		+= pn544/
-obj-$(CONFIG_NFC_MICROREAD)	+= microread/
-obj-$(CONFIG_NFC_PN533)		+= pn533.o
-obj-$(CONFIG_NFC_WILINK)	+= nfcwilink.o
-obj-$(CONFIG_NFC_MEI_PHY)	+= mei_phy.o
-
+obj-$(CONFIG_PN544_NFC)		+= pn544.o
+obj-$(CONFIG_BCM2079X_NFC_I2C)	+= bcm2079x-i2c.o
+obj-$(CONFIG_BCM2079X_NFC_SPI)	+= bcm2079x-spi.o
+obj-$(CONFIG_SEC_NFC_I2C)	+= sec_nfc.o
+obj-$(CONFIG_SEC_NFC_I2C_SB)	+= sec_nfc_sb.o
 ccflags-$(CONFIG_NFC_DEBUG) := -DDEBUG

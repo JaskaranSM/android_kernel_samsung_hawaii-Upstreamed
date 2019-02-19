@@ -48,3 +48,24 @@ config PSTORE_RAM
 	  "ramoops.ko".
 
 	  For more information, see Documentation/ramoops.txt.
+
+config PSTORE_RAM_ERRATA_SIZE_ADD
+	bool ""
+
+config PSTORE_RAM_ERRATA_START_ADD
+	bool ""
+
+config PSTORE_RAM_ADDRESS
+	hex ""
+	default "9e100000"
+
+config PSTORE_RAM_RECORD_SIZE
+	hex ""
+	default "00081000"
+
+config PSTORE_RAM_SIZE
+	hex ""
+	default "00083000"
+
+config PSTORE_RAM_SIZE_UNCHECK
+	bool ""

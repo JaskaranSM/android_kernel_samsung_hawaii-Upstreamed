@@ -209,14 +209,47 @@ dtb-$(CONFIG_ARCH_VT8500) += vt8500-bv07.dtb \
 	wm8650-mid.dtb \
 	wm8850-w70v2.dtb
 dtb-$(CONFIG_ARCH_ZYNQ) += zynq-zc702.dtb
+dtb-$(CONFIG_ARCH_HAWAII) += hawaii_garnet_edn020.dtb \
+	hawaii_garnet_edn010.dtb \
+	hawaii_garnet_edn010_2Gb.dtb \
+	hawaii_garnet_edn010_4Gb.dtb \
+	hawaii_garnet_edn020_4Gb.dtb \
+	hawaii_garnet_edn020_soc_4Gb.dtb \
+	hawaii_garnet_edn020_soc_2Gb.dtb \
+	hawaii_ss_logands_rev01.dtb \
+	hawaii_ss_heat3g_rev00.dtb \
+	hawaii_ss_heat3g_rev01.dtb \
+	hawaii_ss_heatnfc3g_rev00.dtb \
+	hawaii_ss_vivaltods5m_rev00.dtb \
+	hawaii_ss_vivaltonfc3g_rev00.dtb
+dtb-$(CONFIG_ARCH_JAVA) += java_edn000.dtb \
+	java_edn000_4Gb.dtb \
+	java_kivu_xdot0.dtb \
+	java_edn000_2Gb.dtb \
+	java_ss_victor3g_rev00.dtb \
+	java_ss_eval_rev00.dtb
+
+DTB_NAMES := $(subst $\",,$(CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE_NAMES))
+ifneq ($(DTB_NAMES),)
+DTB_LIST := $(addsuffix .dtb,$(DTB_NAMES))
+else
+DTB_LIST := $(dtb-y)
+endif
+
+DTB_NAMES := $(subst $\",,$(CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE_NAMES))
+ifneq ($(DTB_NAMES),)
+DTB_LIST := $(addsuffix .dtb,$(DTB_NAMES))
+else
+DTB_LIST := $(dtb-y)
+endif
 
 targets += dtbs
-targets += $(dtb-y)
+targets += $(DTB_LIST)
 endif
 
 # *.dtb used to be generated in the directory above. Clean out the
 # old build results so people don't accidentally use them.
-dtbs: $(addprefix $(obj)/, $(dtb-y))
+dtbs: $(addprefix $(obj)/, $(DTB_LIST))
 	$(Q)rm -f $(obj)/../*.dtb
 
 clean-files := *.dtb

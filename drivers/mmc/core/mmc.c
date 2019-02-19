@@ -23,6 +23,10 @@
 #include "mmc_ops.h"
 #include "sd_ops.h"
 
+#ifdef CONFIG_MMC_BCM_SD
+#include "../host/sdhci.h"
+#endif
+
 static const unsigned int tran_exp[] = {
 	10000,		100000,		1000000,	10000000,
 	0,		0,		0,		0
@@ -293,7 +297,11 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 	}
 
 	card->ext_csd.rev = ext_csd[EXT_CSD_REV];
-	if (card->ext_csd.rev > 6) {
+#ifdef CONFIG_MMC_BCM_SD
+	if (card->ext_csd.rev > 7) {
+#else
+	if (card->ext_csd.rev > 3) {
+#endif
 		pr_err("%s: unrecognised EXT_CSD revision %d\n",
 			mmc_hostname(card->host), card->ext_csd.rev);
 		err = -EINVAL;
@@ -453,7 +461,11 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 			ext_csd[EXT_CSD_SEC_FEATURE_SUPPORT];
 		card->ext_csd.trim_timeout = 300 *
 			ext_csd[EXT_CSD_TRIM_MULT];
+		card->ext_csd.rpmb_size =
+			ext_csd[EXT_CSD_RPMB_MULT] << 17;
 
+		pr_info(KERN_INFO "%s: card->ext_csd.rpmb_size: %d\n",
+			__func__, card->ext_csd.rpmb_size);
 		/*
 		 * Note that the call to mmc_part_add above defaults to read
 		 * only. If this default assumption is changed, the call must
@@ -547,6 +559,10 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 	} else {
 		card->ext_csd.data_sector_size = 512;
 	}
+
+#ifdef CONFIG_MMC_DISCARD_SAMSUNG_eMMC_SUPPORT
+	card->ext_csd.optimized_features	= ext_csd[EXT_CSD_OPTIMIZED_FEATURES];
+#endif
 
 out:
 	return err;
@@ -944,6 +960,13 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	}
 
 	if (!oldcard) {
+#if defined(CONFIG_MACH_BCM_FPGA_E)
+		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
+					 EXT_CSD_BUS_WIDTH, 1, 0);
+		if (!err) {
+			mmc_set_bus_width(card->host, 2);
+		}
+#endif
 		/*
 		 * Fetch and process extended CSD.
 		 */
@@ -1539,8 +1562,10 @@ int mmc_attach_mmc(struct mmc_host *host)
 		mmc_set_bus_mode(host, MMC_BUSMODE_OPENDRAIN);
 
 	err = mmc_send_op_cond(host, 0, &ocr);
-	if (err)
+	if (err) {
+		pr_err("%s : operation condition getting of %s was failed(%d)\n", __func__, mmc_hostname(host), err);
 		return err;
+	}
 
 	mmc_attach_bus_ops(host);
 	if (host->ocr_avail_mmc)

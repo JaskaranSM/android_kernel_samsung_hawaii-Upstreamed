@@ -1797,13 +1797,13 @@ static int smsc95xx_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
 		/* padding bytes before the next frame starts */
 		if (skb->len)
 			skb_pull(skb, align_count);
-	}
-
+	} 
+/* This less-than-zero comparison of an unsigned value(skb->len) is never true
 	if (unlikely(skb->len < 0)) {
 		netdev_warn(dev->net, "invalid rx length<0 %d\n", skb->len);
 		return 0;
 	}
-
+*/
 	return 1;
 }
 

@@ -187,6 +187,7 @@ config GENERIC_CPU_DEVICES
 	bool
 	default n
 
+
 config SOC_BUS
 	bool
 
@@ -217,6 +218,37 @@ config CMA
 
 if CMA
 
+config CMA_BEST_FIT
+	bool "CMA Best-Fit algorithm for allocation"
+	help
+	  Replaces the default "first-fit" algoritm to select an address
+	  range within a CMA region. This has a bit of a perfomance penalty
+	  but it does give you better reliability against fragmentation of
+	  the region
+
+
+config CMA_DEBUG_FS
+	depends on DEBUG_FS
+	bool "CMA bitmap and statistics in <debugfs mount>/cmaN"
+	help
+	  Adds support to show cma region bitmap along with per region
+	  statistics at the end of bitmap
+
+config CMA_STATS
+	depends on PROC_FS
+	bool "CMA Statistics in /proc/cmastat"
+	help
+	  Adds support to show detailed cma allocations per region
+	  in /proc/cmastat. This adds additional overhead in CMA
+	  alloc/free path
+
+config CMA_TRACER
+	bool "Trace CMA allocation"
+	depends on EVENT_TRACING
+	help
+	  Say Y here enable tracing CMA buffer allocation and release.
+
+
 config CMA_DEBUG
 	bool "CMA debug messages (DEVELOPMENT)"
 	depends on DEBUG_KERNEL
@@ -243,6 +275,8 @@ config CMA_SIZE_PERCENTAGE
 	help
 	  Defines the size of the default memory area for Contiguous Memory
 	  Allocator as a percentage of the total memory in the system.
+
+
 
 choice
 	prompt "Selected region size"
@@ -292,4 +326,30 @@ config CMA_AREAS
 
 endif
 
+config SYNC
+	bool "Synchronization framework"
+	default n
+	select ANON_INODES
+	help
+	  This option enables the framework for synchronization between multiple
+	  drivers.  Sync implementations can take advantage of hardware
+	  synchronization built into devices like GPUs.
+
+config SW_SYNC
+	bool "Software synchronization objects"
+	default n
+	depends on SYNC
+	help
+	  A sync object driver that uses a 32bit counter to coordinate
+	  syncrhronization.  Useful when there is no hardware primitive backing
+	  the synchronization.
+
+config SW_SYNC_USER
+       bool "Userspace API for SW_SYNC"
+       default n
+       depends on SW_SYNC
+       help
+         Provides a user space API to the sw sync object.
+         *WARNING* improper use of this can result in deadlocking kernel
+	 drivers from userspace.
 endmenu

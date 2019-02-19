@@ -19,6 +19,7 @@
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/err.h>
+#include <linux/usb/gadget_cust.h>
 
 #include "u_serial.h"
 #include "gadget_chips.h"
@@ -298,6 +299,23 @@ static struct usb_gadget_strings *acm_strings[] = {
 	NULL,
 };
 
+#ifdef CONFIG_BRCM_FUSE_LOG
+
+/**
+* This function is called to register the callback functions for logging modules.
+*
+* @return    1: ready to send to logging data; 0: not ready to send the logging data.
+*
+*/
+char acm_logging_register_callbacks(struct acm_logging_callbacks *_cb)
+{
+	pr_info("%s\n", __func__);
+	acm_logging_cb = _cb;
+	return 0;	/* logging is not ready to send */
+}
+EXPORT_SYMBOL(acm_logging_register_callbacks);
+#endif
+
 /*-------------------------------------------------------------------------*/
 
 /* ACM control ... data handling is delegated to tty library code.
@@ -573,13 +591,35 @@ static void acm_connect(struct gserial *port)
 {
 	struct f_acm		*acm = port_to_acm(port);
 
+	NPRINTK("\n");
+
 	acm->serial_state |= ACM_CTRL_DSR | ACM_CTRL_DCD;
 	acm_notify_serial_state(acm);
+
+#ifdef CONFIG_BRCM_FUSE_LOG
+	if (acm->port_num == ACM_LOGGING_PORT) {
+		if (acm_logging_cb) {
+			if (acm_logging_cb->start)
+				acm_logging_cb->start();
+		}
+	}
+#endif
 }
 
 static void acm_disconnect(struct gserial *port)
 {
 	struct f_acm		*acm = port_to_acm(port);
+
+	pr_info("%s", __func__);
+
+#ifdef CONFIG_BRCM_FUSE_LOG
+	if (acm->port_num == ACM_LOGGING_PORT) {
+		if (acm_logging_cb) {
+			if (acm_logging_cb->stop)
+				acm_logging_cb->stop();
+		}
+	}
+#endif
 
 	acm->serial_state &= ~(ACM_CTRL_DSR | ACM_CTRL_DCD);
 	acm_notify_serial_state(acm);
@@ -607,7 +647,6 @@ acm_bind(struct usb_configuration *c, struct usb_function *f)
 {
 	struct usb_composite_dev *cdev = c->cdev;
 	struct f_acm		*acm = func_to_acm(f);
-	struct usb_string	*us;
 	int			status;
 	struct usb_ep		*ep;
 
@@ -616,13 +655,17 @@ acm_bind(struct usb_configuration *c, struct usb_function *f)
 	 */
 
 	/* maybe allocate device-global string IDs, and patch descriptors */
-	us = usb_gstrings_attach(cdev, acm_strings,
-			ARRAY_SIZE(acm_string_defs));
-	if (IS_ERR(us))
-		return PTR_ERR(us);
-	acm_control_interface_desc.iInterface = us[ACM_CTRL_IDX].id;
-	acm_data_interface_desc.iInterface = us[ACM_DATA_IDX].id;
-	acm_iad_descriptor.iFunction = us[ACM_IAD_IDX].id;
+	if(acm_string_defs[0].id == 0) {
+		status = usb_string_ids_tab(cdev, acm_string_defs);
+		if(status)
+			return status;
+		acm_control_interface_desc.iInterface = 
+			acm_string_defs[ACM_CTRL_IDX].id;
+		acm_data_interface_desc.iInterface =
+			acm_string_defs[ACM_DATA_IDX].id;
+		acm_iad_descriptor.iFunction = 
+			acm_string_defs[ACM_IAD_IDX].id;
+	}
 
 	/* allocate instance-specific interface IDs, and patch descriptors */
 	status = usb_interface_id(c, f);
@@ -644,6 +687,11 @@ acm_bind(struct usb_configuration *c, struct usb_function *f)
 	acm_call_mgmt_descriptor.bDataInterface = status;
 
 	status = -ENODEV;
+
+	if (acm->port_num == ACM_MODEM_PORT)
+		acm_data_interface_desc.bInterfaceProtocol = 0x00;
+	else if (acm->port_num == ACM_LOGGING_PORT)
+		acm_data_interface_desc.bInterfaceProtocol = 0xFF;
 
 	/* allocate instance-specific endpoints */
 	ep = usb_ep_autoconfig(cdev->gadget, &acm_fs_in_desc);
@@ -697,6 +745,9 @@ acm_bind(struct usb_configuration *c, struct usb_function *f)
 			gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full",
 			acm->port.in->name, acm->port.out->name,
 			acm->notify->name);
+#ifdef CONFIG_BRCM_FUSE_LOG
+	acm_logging_cb = get_acm_callback_func();
+#endif
 	return 0;
 
 fail:
@@ -720,7 +771,6 @@ static void acm_unbind(struct usb_configuration *c, struct usb_function *f)
 {
 	struct f_acm		*acm = func_to_acm(f);
 
-	acm_string_defs[0].id = 0;
 	usb_free_all_descriptors(f);
 	if (acm->notify_req)
 		gs_free_req(acm->notify, acm->notify_req);

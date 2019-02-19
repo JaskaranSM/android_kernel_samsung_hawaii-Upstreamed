@@ -293,7 +293,7 @@ int snd_pcm_update_state(struct snd_pcm_substream *substream,
 			return -EPIPE;
 		}
 	} else {
-		if (avail >= runtime->stop_threshold) {
+		if (avail > runtime->stop_threshold) {
 			xrun(substream);
 			return -EPIPE;
 		}

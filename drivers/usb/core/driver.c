@@ -1139,7 +1139,7 @@ static int usb_resume_interface(struct usb_device *udev,
 		struct usb_interface *intf, pm_message_t msg, int reset_resume)
 {
 	struct usb_driver	*driver;
-	int			status = 0;
+	int			status = 0,ret=0;
 
 	if (udev->state == USB_STATE_NOTATTACHED)
 		goto done;
@@ -1153,8 +1153,10 @@ static int usb_resume_interface(struct usb_device *udev,
 
 		/* Carry out a deferred switch to altsetting 0 */
 		if (intf->needs_altsetting0 && !intf->dev.power.is_prepared) {
-			usb_set_interface(udev, intf->altsetting[0].
+			ret = usb_set_interface(udev, intf->altsetting[0].
 					desc.bInterfaceNumber, 0);
+			if(ret < 0)
+				dev_err(&intf->dev, "usb_set_interface return %d\n", ret);
 			intf->needs_altsetting0 = 0;
 		}
 		goto done;

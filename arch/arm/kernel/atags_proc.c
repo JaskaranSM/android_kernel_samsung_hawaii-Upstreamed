@@ -45,8 +45,9 @@ static int __init init_atags_procfs(void)
 		return -EINVAL;
 	}
 
-	for (; tag->hdr.size; tag = tag_next(tag))
-		;
+	for (; tag->hdr.size; tag = tag_next(tag)){
+		printk (KERN_INFO "%s, tag header size =%d\n",__func__, tag->hdr.size);
+	}
 
 	/* include the terminating ATAG_NONE */
 	size = (char *)tag - atags_copy + sizeof(struct tag_header);

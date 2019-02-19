@@ -140,8 +140,12 @@ obj-$(CONFIG_SENSORS_W83L785TS)	+= w83l785ts.o
 obj-$(CONFIG_SENSORS_W83L786NG)	+= w83l786ng.o
 obj-$(CONFIG_SENSORS_WM831X)	+= wm831x-hwmon.o
 obj-$(CONFIG_SENSORS_WM8350)	+= wm8350-hwmon.o
+obj-$(CONFIG_SENSORS_KONA)	+= kona-tmon.o kona-thermal.o bcmpmu-thermal.o
+ifeq ($(CONFIG_MFD_BCM_PMU59xxx),y)
+obj-$(CONFIG_SENSORS_BCMPMU)    += bcmpmu59xxx-hwmon.o
+endif
 
 obj-$(CONFIG_PMBUS)		+= pmbus/
-
+obj-$(CONFIG_KONA_TMON) 	+= kona_tmon.o
 ccflags-$(CONFIG_HWMON_DEBUG_CHIP) := -DDEBUG
 

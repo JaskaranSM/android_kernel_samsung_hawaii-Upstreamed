@@ -168,6 +168,8 @@ struct hid_item {
 #define HID_UP_CUSTOM		0x00ff0000
 #define HID_UP_LOGIVENDOR	0xffbc0000
 #define HID_UP_SENSOR		0x00200000
+#define HID_UP_SAMSUNG_UNDEFINED 0x0f120000
+#define HID_UP_HP_UNDEFINED 0xffff0000
 
 #define HID_USAGE		0x0000ffff
 
@@ -650,7 +652,7 @@ struct hid_driver {
 			struct hid_input *hidinput, struct hid_field *field,
 			struct hid_usage *usage, unsigned long **bit, int *max);
 	void (*input_configured)(struct hid_device *hdev,
-				 struct hid_input *hidinput);
+				struct hid_input *hidinput);
 	void (*feature_mapping)(struct hid_device *hdev,
 			struct hid_field *field,
 			struct hid_usage *usage);
