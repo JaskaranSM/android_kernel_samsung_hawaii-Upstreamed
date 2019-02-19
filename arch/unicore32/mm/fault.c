@@ -209,7 +209,8 @@ static int do_pf(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 	struct task_struct *tsk;
 	struct mm_struct *mm;
 	int fault, sig, code;
-	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
+	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE |
+				 ((!(fsr ^ 0x12)) ? FAULT_FLAG_WRITE : 0);
 
 	tsk = current;
 	mm = tsk->mm;
@@ -220,11 +221,6 @@ static int do_pf(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 	 */
 	if (in_atomic() || !mm)
 		goto no_context;
-
-	if (user_mode(regs))
-		flags |= FAULT_FLAG_USER;
-	if (!(fsr ^ 0x12))
-		flags |= FAULT_FLAG_WRITE;
 
 	/*
 	 * As per x86, we may deadlock here.  However, since the kernel only
